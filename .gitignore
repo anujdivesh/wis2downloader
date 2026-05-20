@@ -48,7 +48,7 @@ __pycache__/
 /logs/
 
 # Downloaded data
-/downloads/
+#/downloads/
 
 # Celery
 # Celery worker state files (PID files, etc.)
