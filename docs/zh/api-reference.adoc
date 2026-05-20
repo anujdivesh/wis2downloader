@@ -1,0 +1,548 @@
+= WIS2 Downloader API 参考
+:toc: left
+:toc-title: 目录
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+[NOTE]
+====
+本文档由 Claude AI 从英文自动翻译。
+WMO/气象领域术语在正式使用前应由母语人士审阅。
+请参阅 link:../en/[英文原版] 以获取权威版本。
+====
+
+== 概述
+
+WIS2 Downloader 提供了用于管理订阅和监控系统的 REST API。
+
+* **基础 URL：** `http://localhost:5002`
+* **OpenAPI 规范：** `http://localhost:5002/openapi`
+* **Swagger UI：** `http://localhost:5002/swagger`
+
+== 身份验证
+
+当前 API 不需要身份验证。在生产环境中，建议将其放在带有身份验证的反向代理后面。
+
+== 订阅 API
+
+=== 列出订阅
+
+返回所有活跃订阅。
+
+[source,http]
+----
+GET /subscriptions
+----
+
+==== 响应
+
+[cols="1,3"]
+|===
+|状态 |说明
+
+|200
+|成功 — 返回主题到订阅详情的映射
+
+|503
+|Redis 不可用
+|===
+
+==== 示例
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+[source,json]
+----
+{
+  "cache/a/wis2/+/data/core/weather/surface-based-observations/#": {
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "save_path": "surface-obs",
+    "filters": {
+      "accepted_media_types": ["application/bufr", "application/grib"]
+    }
+  }
+}
+----
+
+=== 创建订阅
+
+创建一个新的 WIS2 主题订阅。
+
+[source,http]
+----
+POST /subscriptions
+Content-Type: application/json
+----
+
+==== 请求体
+
+[cols="1,1,1,3"]
+|===
+|字段 |类型 |必填 |说明
+
+|`topic`
+|string
+|是
+|WIS2 MQTT 主题模式。支持 `+`（单级）和 `#`（多级）通配符。
+
+|`target`
+|string
+|否
+|`/data` 下用于保存文件的子目录。
+
+|`filters`
+|object
+|否
+|过滤器配置。
+
+|`filters.accepted_media_types`
+|array
+|否
+|允许的 MIME 类型列表。支持通配符（如 `application/x-grib*`）。
+|===
+
+==== 响应
+
+[cols="1,3"]
+|===
+|状态 |说明
+
+|202
+|已接受 — 订阅已加入处理队列
+
+|400
+|错误请求 — 主题缺失或无效
+
+|503
+|服务不可用 — Redis 连接失败
+|===
+
+==== 响应头
+
+[cols="1,3"]
+|===
+|头部 |说明
+
+|`Location`
+|用于获取订阅详情的 URL
+|===
+
+==== 示例
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "surface-obs",
+    "filters": {
+      "accepted_media_types": ["application/bufr", "application/grib"]
+    }
+  }'
+----
+
+[source,json]
+----
+{
+  "status": "accepted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "target": "surface-obs"
+}
+----
+
+=== 获取订阅
+
+返回特定订阅的详情。
+
+[source,http]
+----
+GET /subscriptions/{topic}
+----
+
+==== 路径参数
+
+[cols="1,1,3"]
+|===
+|参数 |类型 |说明
+
+|`topic`
+|string
+|WIS2 主题（只有 `#` 需要编码为 `%23`）
+|===
+
+==== URL 编码
+
+只有 `#` 字符需要 URL 编码：
+
+[cols="1,1,2"]
+|===
+|字符 |编码 |原因
+
+|`#`
+|`%23`
+|否则会被解释为 URL 片段
+|===
+
+NOTE: 路径中的斜杠（`/`）和 `+` 不需要编码。
+
+==== 响应
+
+[cols="1,3"]
+|===
+|状态 |说明
+
+|200
+|成功
+
+|400
+|无效主题
+
+|404
+|订阅未找到
+
+|503
+|Redis 不可用
+|===
+
+==== 示例
+
+[source,bash]
+----
+curl "http://localhost:5002/subscriptions/cache/a/wis2/+/data/core/weather/surface-based-observations/%23"
+----
+
+[source,json]
+----
+{
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "save_path": "surface-obs",
+  "filters": {
+    "accepted_media_types": ["application/bufr", "application/grib"]
+  }
+}
+----
+
+=== 删除订阅
+
+删除一个订阅。
+
+[source,http]
+----
+DELETE /subscriptions/{topic}
+----
+
+==== 路径参数
+
+[cols="1,1,3"]
+|===
+|参数 |类型 |说明
+
+|`topic`
+|string
+|URL 编码的 WIS2 主题
+|===
+
+==== 响应
+
+[cols="1,3"]
+|===
+|状态 |说明
+
+|200
+|删除成功
+
+|400
+|无效主题
+
+|503
+|Redis 不可用
+|===
+
+==== 示例
+
+[source,bash]
+----
+curl -X DELETE "http://localhost:5002/subscriptions/cache/a/wis2/+/data/core/weather/surface-based-observations/%23"
+----
+
+[source,json]
+----
+{
+  "status": "deleted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#"
+}
+----
+
+== 监控 API
+
+=== 健康检查
+
+返回服务健康状态。
+
+[source,http]
+----
+GET /health
+----
+
+==== 响应
+
+始终返回 200。检查 `status` 字段以获取实际健康状态。
+
+[cols="1,3"]
+|===
+|字段 |值
+
+|`status`
+|`healthy` 或 `unhealthy`
+|===
+
+==== 示例
+
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+[source,json]
+----
+{"status": "healthy"}
+----
+
+=== Prometheus 指标
+
+以 Prometheus 文本格式返回指标。
+
+[source,http]
+----
+GET /metrics
+----
+
+==== 响应
+
+[cols="1,3"]
+|===
+|状态 |说明
+
+|200
+|Prometheus 文本格式指标
+
+|500
+|生成指标时出错
+|===
+
+==== 可用指标
+
+[cols="2,1,2,3"]
+|===
+|指标 |类型 |标签 |说明
+
+|`wis2downloader_notifications_total`
+|Counter
+|status
+|已处理的通知总数
+
+|`wis2downloader_downloads_total`
+|Counter
+|cache, media_type
+|成功下载的文件数
+
+|`wis2downloader_downloads_bytes_total`
+|Counter
+|cache, media_type
+|已下载的总字节数
+
+|`wis2downloader_skipped_total`
+|Counter
+|reason
+|按原因统计的跳过通知数
+
+|`wis2downloader_failed_total`
+|Counter
+|cache, reason
+|失败的下载数
+
+|`wis2downloader_celery_queue_length`
+|Gauge
+|queue_name
+|Celery 队列中的当前任务数
+|===
+
+==== 示例
+
+[source,bash]
+----
+curl http://localhost:5002/metrics
+----
+
+[source,prometheus]
+----
+# HELP wis2downloader_downloads_total Total number of files downloaded.
+# TYPE wis2downloader_downloads_total counter
+wis2downloader_downloads_total{cache="example.cache.com",media_type="application/bufr"} 42.0
+
+# HELP wis2downloader_notifications_total Total notifications processed.
+# TYPE wis2downloader_notifications_total counter
+wis2downloader_notifications_total{status="success"} 42.0
+wis2downloader_notifications_total{status="skipped"} 5.0
+----
+
+=== OpenAPI 规范
+
+以 JSON 格式返回 OpenAPI 3.0 规范。
+
+[source,http]
+----
+GET /openapi
+----
+
+=== Swagger UI
+
+交互式 API 文档。
+
+[source,http]
+----
+GET /
+GET /swagger
+----
+
+== 错误响应
+
+所有错误响应遵循以下格式：
+
+[source,json]
+----
+{
+  "error": "Error message describing the problem"
+}
+----
+
+=== 常见错误消息
+
+[cols="1,1,2"]
+|===
+|状态 |错误 |原因
+
+|400
+|"No topic provided"
+|POST /subscriptions 缺少 topic 字段
+
+|400
+|"No topic passed"
+|GET/DELETE 使用空主题
+
+|404
+|"Subscription for topic X not found"
+|主题未订阅
+
+|503
+|"Failed to connect to Redis: ..."
+|Redis 不可用
+
+|503
+|"Failed to queue subscription command..."
+|Redis pub/sub 失败
+
+|503
+|"Failed to persist subscription..."
+|Redis 写入失败
+|===
+
+== 数据模式
+
+=== 订阅
+
+[source,json]
+----
+{
+  "topic": "string (required) - WIS2 MQTT topic pattern",
+  "save_path": "string | null - Subdirectory for downloads",
+  "filters": {
+    "accepted_media_types": ["array of MIME type strings"]
+  }
+}
+----
+
+=== 过滤器
+
+[source,json]
+----
+{
+  "accepted_media_types": [
+    "application/bufr",
+    "application/grib",
+    "application/x-netcdf*"
+  ]
+}
+----
+
+==== 默认接受的媒体类型
+
+未指定过滤器时，接受以下类型：
+
+[source,json]
+----
+[
+  "image/gif", "image/jpeg", "image/png", "image/tiff",
+  "application/pdf", "application/postscript",
+  "application/bufr", "application/grib",
+  "application/x-hdf", "application/x-hdf5",
+  "application/x-netcdf", "application/x-netcdf4",
+  "text/plain", "text/html", "text/xml", "text/csv",
+  "text/tab-separated-values"
+]
+----
+
+== 主题模式参考
+
+=== WIS2 主题结构
+
+[source]
+----
+{origin|cache}/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+----
+
+* `origin` - 来自数据提供者的原始数据
+* `cache` - 来自全球缓存的缓存副本（推荐用于可靠性）
+* `{centre-id}` - 国家/组织代码，前缀为 ISO2C 国家代码（如 `de-dwd`）
+* `{data-policy}` - WMO 统一数据政策：`core` 或 `recommended`
+* `{earth-system-domain}` - WMO 统一数据政策中的地球系统领域
+
+=== 通配符
+
+[cols="1,1,3"]
+|===
+|模式 |符号 |说明
+
+|单级
+|`+`
+|精确匹配一个级别
+
+|多级
+|`#`
+|匹配零个或多个级别（必须在末尾）
+|===
+
+=== 示例
+
+[cols="2,3"]
+|===
+|模式 |匹配内容
+
+|`cache/a/wis2/de-dwd/data/#`
+|来自 Deutscher Wetterdienst 的所有数据
+
+|`cache/a/wis2/+/data/core/weather/surface-based-observations/#`
+|来自所有中心的地面观测数据
+
+|`cache/a/wis2/+/data/core/#`
+|来自任意中心的所有核心数据
+
+|`cache/a/wis2/+/data/+/weather/#`
+|来自任意中心的所有天气数据（任意政策）
+|===

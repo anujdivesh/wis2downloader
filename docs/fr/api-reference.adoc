@@ -1,0 +1,548 @@
+= Référence API WIS2 Downloader
+:toc: left
+:toc-title: Sommaire
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+[NOTE]
+====
+Ce document a été traduit automatiquement depuis l'anglais par Claude AI.
+Les termes du domaine WMO/météorologique doivent être vérifiés par un locuteur natif avant
+toute utilisation en production. Consultez le lien:../en/[document original en anglais] pour la version faisant autorité.
+====
+
+== Vue d'ensemble
+
+WIS2 Downloader expose une REST API pour gérer les abonnements et surveiller le système.
+
+* **URL de base :** `http://localhost:5002`
+* **Spécification OpenAPI :** `http://localhost:5002/openapi`
+* **Interface Swagger :** `http://localhost:5002/swagger`
+
+== Authentification
+
+Actuellement, l'API ne nécessite pas d'authentification. En production, envisagez de la placer derrière un proxy inverse avec authentification.
+
+== API des abonnements
+
+=== Lister les abonnements
+
+Retourne tous les abonnements actifs.
+
+[source,http]
+----
+GET /subscriptions
+----
+
+==== Réponse
+
+[cols="1,3"]
+|===
+|Statut |Description
+
+|200
+|Succès — retourne la correspondance entre les topics et les détails des abonnements
+
+|503
+|Redis indisponible
+|===
+
+==== Exemple
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+[source,json]
+----
+{
+  "cache/a/wis2/+/data/core/weather/surface-based-observations/#": {
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "save_path": "surface-obs",
+    "filters": {
+      "accepted_media_types": ["application/bufr", "application/grib"]
+    }
+  }
+}
+----
+
+=== Créer un abonnement
+
+Crée un nouvel abonnement à un topic WIS2.
+
+[source,http]
+----
+POST /subscriptions
+Content-Type: application/json
+----
+
+==== Corps de la requête
+
+[cols="1,1,1,3"]
+|===
+|Champ |Type |Requis |Description
+
+|`topic`
+|string
+|Oui
+|Modèle de topic MQTT WIS2. Prend en charge les caractères génériques `+` (niveau unique) et `#` (niveaux multiples).
+
+|`target`
+|string
+|Non
+|Sous-répertoire sous `/data` où les fichiers seront enregistrés.
+
+|`filters`
+|objet
+|Non
+|Configuration du filtre.
+
+|`filters.accepted_media_types`
+|tableau
+|Non
+|Liste des types MIME autorisés. Prend en charge les caractères génériques (ex. `application/x-grib*`).
+|===
+
+==== Réponse
+
+[cols="1,3"]
+|===
+|Statut |Description
+
+|202
+|Accepté — abonnement mis en file d'attente pour traitement
+
+|400
+|Requête incorrecte — topic manquant ou invalide
+
+|503
+|Service indisponible — connexion Redis échouée
+|===
+
+==== En-têtes de réponse
+
+[cols="1,3"]
+|===
+|En-tête |Description
+
+|`Location`
+|URL pour récupérer les détails de l'abonnement
+|===
+
+==== Exemple
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "surface-obs",
+    "filters": {
+      "accepted_media_types": ["application/bufr", "application/grib"]
+    }
+  }'
+----
+
+[source,json]
+----
+{
+  "status": "accepted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "target": "surface-obs"
+}
+----
+
+=== Obtenir un abonnement
+
+Retourne les détails d'un abonnement spécifique.
+
+[source,http]
+----
+GET /subscriptions/{topic}
+----
+
+==== Paramètres de chemin
+
+[cols="1,1,3"]
+|===
+|Paramètre |Type |Description
+
+|`topic`
+|string
+|Topic WIS2 (seul `#` nécessite l'encodage en `%23`)
+|===
+
+==== Encodage URL
+
+Seul le caractère `#` nécessite un encodage URL :
+
+[cols="1,1,2"]
+|===
+|Caractère |Encodé |Raison
+
+|`#`
+|`%23`
+|Sinon interprété comme un fragment d'URL
+|===
+
+NOTE: Les barres obliques (`/`) et `+` ne nécessitent pas d'encodage dans le chemin.
+
+==== Réponse
+
+[cols="1,3"]
+|===
+|Statut |Description
+
+|200
+|Succès
+
+|400
+|Topic invalide
+
+|404
+|Abonnement introuvable
+
+|503
+|Redis indisponible
+|===
+
+==== Exemple
+
+[source,bash]
+----
+curl "http://localhost:5002/subscriptions/cache/a/wis2/+/data/core/weather/surface-based-observations/%23"
+----
+
+[source,json]
+----
+{
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "save_path": "surface-obs",
+  "filters": {
+    "accepted_media_types": ["application/bufr", "application/grib"]
+  }
+}
+----
+
+=== Supprimer un abonnement
+
+Supprime un abonnement.
+
+[source,http]
+----
+DELETE /subscriptions/{topic}
+----
+
+==== Paramètres de chemin
+
+[cols="1,1,3"]
+|===
+|Paramètre |Type |Description
+
+|`topic`
+|string
+|Topic WIS2 encodé URL
+|===
+
+==== Réponse
+
+[cols="1,3"]
+|===
+|Statut |Description
+
+|200
+|Supprimé avec succès
+
+|400
+|Topic invalide
+
+|503
+|Redis indisponible
+|===
+
+==== Exemple
+
+[source,bash]
+----
+curl -X DELETE "http://localhost:5002/subscriptions/cache/a/wis2/+/data/core/weather/surface-based-observations/%23"
+----
+
+[source,json]
+----
+{
+  "status": "deleted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#"
+}
+----
+
+== API de surveillance
+
+=== Vérification de l'état de santé
+
+Retourne l'état de santé du service.
+
+[source,http]
+----
+GET /health
+----
+
+==== Réponse
+
+Retourne toujours 200. Vérifiez le champ `status` pour connaître l'état réel.
+
+[cols="1,3"]
+|===
+|Champ |Valeurs
+
+|`status`
+|`healthy` ou `unhealthy`
+|===
+
+==== Exemple
+
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+[source,json]
+----
+{"status": "healthy"}
+----
+
+=== Métriques Prometheus
+
+Retourne les métriques au format texte Prometheus.
+
+[source,http]
+----
+GET /metrics
+----
+
+==== Réponse
+
+[cols="1,3"]
+|===
+|Statut |Description
+
+|200
+|Métriques au format texte Prometheus
+
+|500
+|Erreur lors de la génération des métriques
+|===
+
+==== Métriques disponibles
+
+[cols="2,1,2,3"]
+|===
+|Métrique |Type |Labels |Description
+
+|`wis2downloader_notifications_total`
+|Counter
+|status
+|Total des notifications traitées
+
+|`wis2downloader_downloads_total`
+|Counter
+|cache, media_type
+|Fichiers téléchargés avec succès
+
+|`wis2downloader_downloads_bytes_total`
+|Counter
+|cache, media_type
+|Total des octets téléchargés
+
+|`wis2downloader_skipped_total`
+|Counter
+|reason
+|Notifications ignorées par raison
+
+|`wis2downloader_failed_total`
+|Counter
+|cache, reason
+|Téléchargements échoués
+
+|`wis2downloader_celery_queue_length`
+|Gauge
+|queue_name
+|Tâches actuellement dans la file d'attente Celery
+|===
+
+==== Exemple
+
+[source,bash]
+----
+curl http://localhost:5002/metrics
+----
+
+[source,prometheus]
+----
+# HELP wis2downloader_downloads_total Total number of files downloaded.
+# TYPE wis2downloader_downloads_total counter
+wis2downloader_downloads_total{cache="example.cache.com",media_type="application/bufr"} 42.0
+
+# HELP wis2downloader_notifications_total Total notifications processed.
+# TYPE wis2downloader_notifications_total counter
+wis2downloader_notifications_total{status="success"} 42.0
+wis2downloader_notifications_total{status="skipped"} 5.0
+----
+
+=== Spécification OpenAPI
+
+Retourne la spécification OpenAPI 3.0 au format JSON.
+
+[source,http]
+----
+GET /openapi
+----
+
+=== Interface Swagger
+
+Documentation API interactive.
+
+[source,http]
+----
+GET /
+GET /swagger
+----
+
+== Réponses d'erreur
+
+Toutes les réponses d'erreur suivent ce format :
+
+[source,json]
+----
+{
+  "error": "Error message describing the problem"
+}
+----
+
+=== Messages d'erreur courants
+
+[cols="1,1,2"]
+|===
+|Statut |Erreur |Cause
+
+|400
+|"No topic provided"
+|POST /subscriptions sans champ topic
+
+|400
+|"No topic passed"
+|GET/DELETE avec topic vide
+
+|404
+|"Subscription for topic X not found"
+|Topic non abonné
+
+|503
+|"Failed to connect to Redis: ..."
+|Redis indisponible
+
+|503
+|"Failed to queue subscription command..."
+|Redis pub/sub échoué
+
+|503
+|"Failed to persist subscription..."
+|Écriture Redis échouée
+|===
+
+== Schémas de données
+
+=== Abonnement
+
+[source,json]
+----
+{
+  "topic": "string (required) - WIS2 MQTT topic pattern",
+  "save_path": "string | null - Subdirectory for downloads",
+  "filters": {
+    "accepted_media_types": ["array of MIME type strings"]
+  }
+}
+----
+
+=== Filtres
+
+[source,json]
+----
+{
+  "accepted_media_types": [
+    "application/bufr",
+    "application/grib",
+    "application/x-netcdf*"
+  ]
+}
+----
+
+==== Types de médias acceptés par défaut
+
+Lorsqu'aucun filtre n'est spécifié, ces types sont acceptés :
+
+[source,json]
+----
+[
+  "image/gif", "image/jpeg", "image/png", "image/tiff",
+  "application/pdf", "application/postscript",
+  "application/bufr", "application/grib",
+  "application/x-hdf", "application/x-hdf5",
+  "application/x-netcdf", "application/x-netcdf4",
+  "text/plain", "text/html", "text/xml", "text/csv",
+  "text/tab-separated-values"
+]
+----
+
+== Référence des modèles de topics
+
+=== Structure des topics WIS2
+
+[source]
+----
+{origin|cache}/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+----
+
+* `origin` — Données originales provenant du fournisseur de données
+* `cache` — Copie mise en cache depuis un Global Cache (recommandé pour la fiabilité)
+* `{centre-id}` — Code pays/organisation, précédé du code pays ISO2C (ex. `de-dwd`)
+* `{data-policy}` — Politique de données unifiée WMO : `core` ou `recommended`
+* `{earth-system-domain}` — Domaine du système terrestre issu de la politique de données unifiée WMO
+
+=== Caractères génériques
+
+[cols="1,1,3"]
+|===
+|Modèle |Symbole |Description
+
+|Niveau unique
+|`+`
+|Correspond exactement à un niveau
+
+|Niveaux multiples
+|`#`
+|Correspond à zéro ou plusieurs niveaux (doit être en fin de topic)
+|===
+
+=== Exemples
+
+[cols="2,3"]
+|===
+|Modèle |Correspond à
+
+|`cache/a/wis2/de-dwd/data/#`
+|Toutes les données du Deutscher Wetterdienst
+
+|`cache/a/wis2/+/data/core/weather/surface-based-observations/#`
+|Observations de surface de tous les centres
+
+|`cache/a/wis2/+/data/core/#`
+|Toutes les données de base de n'importe quel centre
+
+|`cache/a/wis2/+/data/+/weather/#`
+|Toutes les données météorologiques (toute politique) de n'importe quel centre
+|===

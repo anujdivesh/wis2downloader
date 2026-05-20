@@ -1,0 +1,1142 @@
+= Guide du développeur WIS2 Downloader
+:toc: left
+:toc-title: Sommaire
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+[NOTE]
+====
+Ce document a été traduit automatiquement depuis l'anglais par Claude AI.
+Les termes du domaine WMO/météorologique doivent être vérifiés par un locuteur natif avant
+toute utilisation en production. Consultez le lien:../en/[document original en anglais] pour la version faisant autorité.
+====
+
+== Aperçu de l'architecture
+
+WIS2 Downloader est un système distribué composé de quatre composants principaux :
+
+[source]
+----
+                         Docker Compose
+  ┌──────────────────────────────────────────────────────────┐
+  │                                                           │
+  │  Web UI (NiceGUI :8080)                                   │
+  │    - reads GDC catalogue data from Redis cache            │
+  │    - posts subscriptions to Subscription Manager API      │
+  │                          │                                │
+  │                          ▼                                │
+  │  Subscription Manager (Flask API :5001)                   │
+  │    - persists subscriptions in Redis                      │
+  │    - publishes subscribe/unsubscribe commands via PubSub  │
+  │                          │                                │
+  │              Redis PubSub (commands)                      │
+  │                          │                                │
+  │                          ▼                                │
+  │  Subscriber (MQTT Client)                                 │
+  │    - connects to WIS2 Global Broker                       │
+  │    - on notification: queues Celery download task         │
+  │                          │                                │
+  │              Redis (Celery queue + dedup state)           │
+  │                          │                                │
+  │                          ▼                                │
+  │  Celery Workers                                           │
+  │    - download file, verify hash, apply filters, save      │
+  │                                                           │
+  └──────────────────────────────────────────────────────────┘
+----
+
+=== Flux de données
+
+1. Au démarrage, l'interface web récupère les enregistrements WCMP2 depuis les trois points de terminaison GDC (ou le cache Redis) et construit une hiérarchie de rubriques en mémoire
+2. L'utilisateur parcourt la vue Catalogue ou Arborescence et sélectionne une rubrique dans l'interface web
+3. L'utilisateur clique sur *S'abonner* → l'interface web envoie un POST d'abonnement à l'API REST du gestionnaire d'abonnements
+4. Le gestionnaire d'abonnements persiste l'abonnement dans Redis et publie une commande d'abonnement sur le canal PubSub Redis
+5. L'abonné reçoit la commande et s'abonne à la rubrique MQTT sur le courtier global WIS2
+6. Lorsqu'une notification WIS2 arrive, l'abonné met en file d'attente une tâche de téléchargement Celery
+7. Le worker Celery télécharge le fichier, vérifie le hash, applique les filtres et sauvegarde sur disque
+
+== Structure des modules
+
+[source]
+----
+modules/
+├── shared/                 # Shared utilities
+│   └── shared/
+│       ├── __init__.py
+│       ├── logging.py      # Centralized logging
+│       └── redis_client.py # Redis client singleton
+│
+├── subscriber/             # MQTT subscriber service
+│   └── subscriber/
+│       ├── __init__.py
+│       ├── manager.py      # Entry point, thread management
+│       ├── subscriber.py   # MQTT client wrapper
+│       └── command_listener.py  # Redis PubSub listener
+│
+├── subscription_manager/   # REST API service
+│   └── subscription_manager/
+│       ├── __init__.py
+│       ├── app.py          # Flask application
+│       └── static/
+│           └── openapi.yml # API specification
+│
+├── task_manager/           # Celery tasks
+│   └── task_manager/
+│       ├── __init__.py
+│       ├── worker.py       # Celery app configuration
+│       ├── tasks/
+│       │   └── wis2.py     # Download tasks
+│       └── workflows/
+│           └── __init__.py # Task chains
+│
+└── ui/                     # NiceGUI web interface (port 8080)
+    ├── main.py             # Entry point, page route, AppState
+    ├── layout.py           # PageLayout builder
+    ├── config.py           # Environment variable config
+    ├── data.py             # GDC data layer — fetch, merge, cache, hierarchy
+    ├── assets/
+    │   └── base.css        # All custom CSS
+    ├── components/         # Reusable layout components
+    ├── i18n/               # Internationalisation
+    │   ├── __init__.py     # t(), current_lang(), is_rtl(), LANGUAGES
+    │   ├── en.py           # English strings (source of truth)
+    │   ├── fr.py           # French
+    │   ├── es.py           # Spanish
+    │   ├── ar.py           # Arabic (RTL)
+    │   ├── zh.py           # Chinese
+    │   └── ru.py           # Russian
+    ├── models/
+    │   └── wcmp2.py        # WCMP2Record dataclass
+    └── views/              # Page views (catalogue, tree, subscriptions, etc.)
+----
+
+== Détails des modules
+
+=== Module partagé
+
+Fournit des utilitaires communs utilisés dans tous les services.
+
+==== Client Redis
+
+.modules/shared/shared/redis_client.py
+[source,python]
+----
+from shared import get_redis_client
+
+# Obtenir le client Redis (singleton)
+redis = get_redis_client()
+
+# Utiliser comme un client Redis normal
+redis.set('key', 'value')
+redis.get('key')
+----
+
+Le client :
+
+* Se connecte directement au serveur Redis
+* Met en cache la connexion (modèle singleton)
+* Inclut une logique de réessai pour les échecs transitoires
+
+==== Journalisation
+
+.modules/shared/shared/logging.py
+[source,python]
+----
+from shared import setup_logging
+
+# Configurer le logger racine (appeler une fois au démarrage)
+setup_logging()
+
+# Obtenir un logger spécifique au module
+LOGGER = setup_logging(__name__)
+
+LOGGER.info("Message with UTC timestamp")
+----
+
+Fonctionnalités :
+
+* Horodatages UTC au format ISO 8601
+* Configurable via la variable d'environnement `LOG_LEVEL`
+* Sortie vers stdout pour la collecte des journaux Docker
+
+=== Module abonné
+
+Se connecte au courtier global WIS2 via MQTT et traite les notifications entrantes.
+
+==== Point d'entrée
+
+.modules/subscriber/subscriber/manager.py
+[source,python]
+----
+def run_manager():
+    # 1. Create MQTT subscriber
+    mqtt_subscriber = Subscriber(**broker_config)
+
+    # 2. Create Redis command listener
+    redis_listener = CommandListener(
+        subscriber=mqtt_subscriber,
+        channel=COMMAND_CHANNEL
+    )
+
+    # 3. Start MQTT in separate thread
+    mqtt_thread = threading.Thread(target=mqtt_subscriber.start, daemon=True)
+    mqtt_thread.start()
+
+    # 4. Start Redis listener (blocks)
+    redis_listener.start()
+----
+
+==== Abonné MQTT
+
+.modules/subscriber/subscriber/subscriber.py
+[source,python]
+----
+class Subscriber:
+    def __init__(self, host, port, uid, pwd, protocol, session):
+        # Configure MQTT client with callbacks
+        self.client = mqtt.Client(...)
+        self.client.on_message = self._on_message
+
+    def _on_message(self, client, userdata, msg):
+        # Parse notification, create Celery task
+        job = {
+            "topic": msg.topic,
+            "target": target,
+            "filters": filters,
+            "payload": json.loads(msg.payload)
+        }
+        workflow = wis2_download(job)
+        workflow.apply_async()
+
+    def subscribe(self, topic, target, filters):
+        self.client.subscribe(topic, qos=0)
+        self.active_subscriptions[topic] = {...}
+
+    def unsubscribe(self, topic):
+        self.client.unsubscribe(topic)
+        del self.active_subscriptions[topic]
+----
+
+==== Écouteur de commandes
+
+.modules/subscriber/subscriber/command_listener.py
+[source,python]
+----
+class CommandListener(threading.Thread):
+    def __init__(self, subscriber, channel):
+        self.subscriber = subscriber
+        self.pubsub = get_redis_client().pubsub()
+
+    def run(self):
+        self.pubsub.subscribe(self.channel)
+        while not self.stop_event.is_set():
+            message = self.pubsub.get_message()
+            if message:
+                self._process_command(message)
+
+    def _process_command(self, message):
+        command = json.loads(message['data'])
+        if command['action'] == 'subscribe':
+            self.subscriber.subscribe(
+                command['topic'],
+                command['save_path'],
+                command['filters']
+            )
+        elif command['action'] == 'unsubscribe':
+            self.subscriber.unsubscribe(command['topic'])
+----
+
+=== Module gestionnaire d'abonnements
+
+API REST Flask pour gérer les abonnements.
+
+==== Application Flask
+
+.modules/subscription_manager/subscription_manager/app.py
+[source,python]
+----
+@app.post('/subscriptions')
+def add_subscription():
+    data = get_json()
+    topic = normalise_topic(data.get('topic'))
+    target = normalise_path(data.get('target', ''))
+    filters = data.get('filters', {})
+
+    # Publish command to subscriber via Redis PubSub
+    command = {
+        "action": "subscribe",
+        "topic": topic,
+        "save_path": target,
+        "filters": filters
+    }
+    publish_command(command, COMMAND_CHANNEL)
+
+    # Persist to Redis for durability
+    persist_subscription(topic, target, filters)
+
+    return jsonify({"status": "accepted", ...}), 202
+----
+
+==== Point de terminaison des métriques
+
+Les métriques sont stockées dans Redis via des opérations `HINCRBYFLOAT` atomiques, ce qui les rend sûres pour plusieurs conteneurs de workers Celery. Le point de terminaison lit depuis Redis et génère le format texte Prometheus :
+
+[source,python]
+----
+@app.route('/metrics')
+def expose_metrics():
+    from shared.redis_metrics import generate_prometheus_text, set_gauge
+    set_gauge('celery_queue_length', {}, get_queue_length())
+    return Response(generate_prometheus_text(), mimetype='text/plain')
+----
+
+Incrémenter un compteur depuis n'importe quel worker :
+
+[source,python]
+----
+from shared import incr_counter
+incr_counter('downloads_total', {'cache': hostname, 'media_type': mime_type})
+----
+
+=== Module gestionnaire de tâches
+
+Workers Celery pour télécharger et traiter les fichiers.
+
+==== Configuration Celery
+
+.modules/task_manager/task_manager/worker.py
+[source,python]
+----
+app = Celery('tasks',
+             broker=CELERY_BROKER_URL,
+             result_backend=CELERY_RESULT_BACKEND)
+
+# Découverte automatique des tâches
+app.autodiscover_tasks(['task_manager.tasks', 'task_manager.tasks.wis2'])
+----
+
+==== Tâche de téléchargement
+
+.modules/task_manager/task_manager/tasks/wis2.py
+[source,python]
+----
+@app.task(bind=True)
+@metrics_collector
+def download_from_wis2(self, job):
+    result = {...}  # Initialize result dict
+
+    # 1. Extract identifiers
+    message_id = job['payload']['id']
+    data_id = job['payload']['properties']['data_id']
+    filehash = job['payload']['properties']['integrity']['value']
+
+    # 2. Deduplication check
+    for key, type in [(message_id, 'by-msg-id'), ...]:
+        if get_status(key, type) == STATUS_SUCCESS:
+            result['status'] = STATUS_SKIPPED
+            return result
+
+    # 3. Acquire lock
+    lock_acquired = redis_client.set(lock_key, 1, nx=True, ex=LOCK_EXPIRE)
+    if not lock_acquired:
+        raise self.retry(countdown=10, max_retries=10)
+
+    # 4. Download file
+    response = _pool.request('GET', download_url, ...)
+
+    # 5. Verify hash
+    if hash_expected and hash_base64 != hash_expected:
+        result['status'] = STATUS_FAILED
+        return result
+
+    # 6. Check media type filter
+    if not _is_allowed_media_type(file_type, filters):
+        result['status'] = STATUS_SKIPPED
+        return result
+
+    # 7. Save file
+    output_path.write_bytes(data)
+    result['status'] = STATUS_SUCCESS
+    return result
+----
+
+==== Chaînes de flux de travail
+
+.modules/task_manager/task_manager/workflows/__init__.py
+[source,python]
+----
+def wis2_download(args):
+    # Chain: download -> decode/ingest
+    workflow = download_from_wis2.s(args) | decode_and_ingest.s()
+    return workflow
+----
+
+==== Planificateur (tâches périodiques)
+
+Une application Celery distincte (`scheduler.py`) gère les tâches de maintenance via Celery Beat. Elle utilise les bases de données Redis 2/3 pour éviter d'interférer avec les files d'attente du worker de téléchargement (bases de données 0/1). Les tâches périodiques sont définies dans `tasks/scheduled_tasks.py` :
+
+[cols="2,1,3"]
+|===
+|Tâche |Intervalle |Objectif
+
+|`check_disk_space`
+|Toutes les 5 min
+|Définit les jauges `disk_total_bytes`, `disk_used_bytes`, `disk_free_bytes`
+
+|`clean_directory`
+|Toutes les 10 min
+|Supprime les fichiers plus anciens que `DOWNLOAD_RETENTION_PERIOD` jours ; décrémente `disk_downloads_bytes` par fichier supprimé
+
+|`recalibrate_downloads_size`
+|Quotidiennement
+|Parcours complet via `os.walk` pour corriger toute dérive dans la jauge `disk_downloads_bytes`
+|===
+
+Le planificateur est démarré en tant que deux services Docker Compose : `celery-scheduler-workers` (exécute les tâches) et `celery-beats` (les déclenche selon le calendrier).
+
+== Module d'interface
+
+L'interface est une application web NiceGUI servie sur le port 8080. C'est l'interface principale destinée aux utilisateurs pour découvrir des jeux de données, parcourir la hiérarchie des rubriques WIS2 et créer des abonnements.
+
+=== Structure du module
+
+[source]
+----
+modules/ui/
+├── main.py                  # Application entry point, page route, AppState
+├── layout.py                # PageLayout builder
+├── config.py                # Environment variable config (SUBSCRIPTION_MANAGER_URL etc.)
+├── data.py                  # GDC data layer — fetch, merge, cache, hierarchy
+├── assets/
+│   └── base.css             # All custom CSS (inside @layer components)
+├── components/
+│   ├── header.py            # WMO banner + toolbar + language selector
+│   ├── footer.py            # Footer bar
+│   ├── navigation_drawer.py # Left nav drawer with view links
+│   └── page_body.py         # Main content area + right sidebar
+├── i18n/                    # Internationalisation
+│   ├── __init__.py          # t(), current_lang(), is_rtl(), LANGUAGES
+│   ├── en.py                # English strings (source of truth)
+│   ├── fr.py                # French
+│   ├── es.py                # Spanish
+│   ├── ar.py                # Arabic (RTL)
+│   ├── zh.py                # Chinese
+│   └── ru.py                # Russian
+├── models/
+│   └── wcmp2.py             # WCMP2Record dataclass (GeoJSON Feature)
+└── views/
+    ├── dashboard.py         # Grafana iframe embed
+    ├── catalogue.py         # Catalogue search + result cards
+    ├── tree.py              # Topic hierarchy tree
+    ├── subscriptions.py     # Active subscriptions list
+    ├── settings.py          # GDC status + refresh trigger
+    └── shared.py            # Shared sidebar logic (on_topics_picked, confirm_subscribe, show_metadata)
+----
+
+=== Couche de données (data.py)
+
+La couche de données est responsable de la récupération des enregistrements WCMP2 depuis les trois catalogues de découverte mondiaux WIS2 (GDC), de leur fusion et de la construction de deux caches au niveau module que toutes les vues lisent.
+
+==== Sources GDC
+
+Les enregistrements sont récupérés depuis trois points de terminaison GDC publics au démarrage :
+
+[cols="1,2"]
+|===
+|Nom court |URL
+
+|`CMA`
+|`https://gdc.wis.cma.cn`
+
+|`DWD`
+|`https://wis2.dwd.de/gdc`
+
+|`ECCC`
+|`https://wis2-gdc.weather.gc.ca`
+|===
+
+Les réponses JSON brutes sont mises en cache dans Redis sous les clés `gdc:cache:CMA`, `gdc:cache:DWD` et `gdc:cache:ECCC` avec un TTL contrôlé par `GDC_CACHE_TTL_SECONDS` (6 heures par défaut). Redis est optionnel — s'il n'est pas disponible, les données sont récupérées via HTTP à chaque démarrage.
+
+==== Enregistrements fusionnés
+
+Après le chargement de toutes les sources GDC, `_build_merged_records()` déduplique les enregistrements par ID entre les catalogues :
+
+* Les enregistrements présents dans un seul catalogue apparaissent une fois avec une seule entrée `source_gdcs`.
+* Les enregistrements présents dans plusieurs catalogues sont fusionnés : `source_gdcs` liste tous les catalogues contributeurs.
+* `has_discrepancy` est défini à `True` si les propriétés, la géométrie ou les liens diffèrent entre les catalogues.
+* Les liens sont unionisés entre les catalogues afin que les données de canal présentes dans l'un quelconque des GDC soient conservées dans l'enregistrement fusionné.
+
+Le résultat est stocké dans la liste `_merged_records` au niveau module et retourné par `merged_records()`.
+
+==== Hiérarchie des rubriques
+
+`_build_topic_hierarchy()` itère sur `_merged_records` et insère le premier canal MQTT `cache/` de chaque enregistrement dans un dict imbriqué :
+
+[source]
+----
+{
+  "cache": {
+    "children": {
+      "a": {
+        "children": {
+          "wis2": {
+            "children": {
+              "de-dwd": {
+                "children": {
+                  ...
+                  "synop": {
+                    "datasets": [<WCMP2Record>, ...]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+----
+
+Un nœud peut contenir à la fois `"children"` et `"datasets"` si un canal est un préfixe d'un autre.
+
+La hiérarchie est stockée dans `_topic_hierarchy` et retournée par `topic_hierarchy()`. Elle est consommée par `tree.py` pour construire le widget `ui.tree`, et par `get_datasets_for_channel()` pour résoudre les jeux de données pour une rubrique donnée.
+
+==== Fonctions clés
+
+[cols="2,3"]
+|===
+|Fonction |Description
+
+|`merged_records() -> list[MergedRecord]`
+|Retourne la liste d'enregistrements fusionnés mise en cache
+
+|`topic_hierarchy() -> dict`
+|Retourne la hiérarchie de rubriques mise en cache
+
+|`get_datasets_for_channel(channel) -> list[WCMP2Record]`
+|Supprime le `/#` final, navigue dans la hiérarchie et collecte récursivement tous les jeux de données de ce nœud et de ses descendants
+
+|`scrape_all(force=False)`
+|Récupère les données GDC (cache Redis en premier, puis HTTP), reconstruit `_merged_records` et `_topic_hierarchy`
+|===
+
+=== Modèle WCMP2 (models/wcmp2.py)
+
+`WCMP2Record` est une représentation dataclass d'une Feature GeoJSON de métadonnées de découverte WIS2.
+
+[source,python]
+----
+from models.wcmp2 import WCMP2Record
+
+rec = WCMP2Record.from_dict(feature_dict)
+
+rec.id                   # str - unique dataset identifier
+rec.title                # str | None
+rec.description          # str | None
+rec.keywords             # list[str]
+rec.wmo_data_policy      # 'core' | 'recommended' | None
+rec.geometry             # Geometry | None  (.type, .coordinates)
+rec.links                # list[Link]  (.channel, .href, .rel, .extra)
+rec.mqtt_channels        # list[str]  - channels from all links
+----
+
+`Link.extra` est un dict capturant les clés hors-schéma de la réponse GDC (ex. `filters` spécifiques au GDC utilisés pour les champs de filtre personnalisés dans le panneau d'abonnement).
+
+=== AppState
+
+Chaque session de navigateur possède sa propre instance `AppState` (définie dans `main.py`) :
+
+[source,python]
+----
+class AppState:
+    def __init__(self):
+        self.selected_topics: list[str] = []
+        self.current_view: str = 'dashboard'
+----
+
+`selected_topics` contient les rubriques MQTT actuellement sélectionnées dans l'interface et pilote le panneau latéral droit. `current_view` suit le nom de la vue active et est persisté dans `app.storage.user['current_view']` avant tout rechargement de page (ex. lors d'un changement de langue) pour que l'utilisateur soit ramené à la même vue.
+
+=== Vues
+
+Toutes les vues suivent la même convention : une fonction `render(container, ...)` qui construit les éléments NiceGUI à l'intérieur de l'élément conteneur fourni. `render` est toujours une fonction simple (non asynchrone) afin de pouvoir être appelée de manière synchrone depuis `show_view()` dans `main.py`.
+
+==== Vue catalogue
+
+`views/catalogue.py` fournit une recherche en texte intégral dans `merged_records()` avec des fonctions de filtre pures :
+
+[cols="2,3"]
+|===
+|Fonction |Description
+
+|`filter_feature(record, query)`
+|Fait correspondre la requête avec l'ID, le titre, la description, les mots-clés et les concepts thématiques
+
+|`filter_by_data_policy(record, policy)`
+|Fait correspondre `'core'`, `'recommended'` ou `'all'`
+
+|`filter_by_keywords(record, keywords)`
+|Mots-clés séparés par des virgules ; tous doivent apparaître dans l'enregistrement
+
+|`filter_by_bbox(record, bbox)`
+|Intersection géométrique Shapely avec le bounding box donné
+|===
+
+Les cartes de résultats sont rendues par `update_search_results()`, qui gère également la pagination.
+
+==== Vue arborescence
+
+`views/tree.py` convertit `topic_hierarchy()` en nœuds `ui.tree` via `_to_tree_nodes()` (récursif, trié alphabétiquement). La sélection utilise `on_select` pour imposer la sélection d'un nœud unique — `on_tick` n'est pas utilisé car il entre en conflit avec la synchronisation d'état interne de NiceGUI.
+
+==== Panneau latéral partagé (views/shared.py)
+
+`on_topics_picked(e, state, layout, is_page_selection, dataset_id)` est le gestionnaire central pour la sélection depuis le catalogue et l'arborescence. Il :
+
+1. Met à jour `state.selected_topics`
+2. Construit le panneau latéral droit avec la saisie du répertoire de sauvegarde, les filtres jeux de données/types de médias/bbox/date et les filtres personnalisés optionnels
+3. Câble le bouton *S'abonner* à `confirm_subscribe()`
+
+`confirm_subscribe()` affiche un dialogue avec la charge utile JSON complète avant d'appeler `subscribe_to_topics()`.
+
+`show_metadata(dataset_id)` recherche l'enregistrement dans `merged_records()` et affiche un dialogue de détails avec une carte Leaflet interactive.
+
+=== Ajout d'une nouvelle vue
+
+1. Créez `modules/ui/views/myview.py` avec une fonction `render(container)`, en utilisant `t()` pour toutes les chaînes visibles par l'utilisateur
+2. Ajoutez une entrée de navigation dans `components/navigation_drawer.py` — la liste `NAV_ITEMS` prend un tuple `(view_id, label_key, icon)` où `label_key` est une clé i18n `nav.*`
+3. Ajoutez une branche dans le répartiteur `show_view()` dans `main.py`
+4. Ajoutez toutes les nouvelles classes CSS dans `assets/base.css` à l'intérieur du bloc `@layer components { ... }`
+5. Ajoutez toutes les nouvelles clés de chaînes dans `i18n/en.py` et dans chaque autre fichier de langue — voir <<internationalisation>>
+
+[[internationalisation]]
+=== Internationalisation (i18n)
+
+L'interface prend en charge plusieurs langues via un système i18n léger basé sur des dictionnaires dans `modules/ui/i18n/`.
+
+==== Langues prises en charge
+
+[cols="1,2,1"]
+|===
+|Code |Langue |Direction
+
+|`en`
+|English
+|LTR
+
+|`fr`
+|Français
+|LTR
+
+|`es`
+|Español
+|LTR
+
+|`ar`
+|العربية
+|RTL
+
+|`zh`
+|中文
+|LTR
+
+|`ru`
+|Русский
+|LTR
+|===
+
+La langue active est stockée par session de navigateur dans `app.storage.user['lang']` et par défaut en anglais. Les utilisateurs changent de langue via le sélecteur dans la barre d'outils de l'en-tête ; la page se recharge pour appliquer le changement.
+
+==== Fonctionnement de `t()`
+
+[source,python]
+----
+from i18n import t
+
+# Recherche simple
+label = t('nav.dashboard')                      # → 'Dashboard'
+
+# Avec interpolation (utilise str.format)
+label = t('subscriptions.folder', path='./')    # → 'Folder: ./'
+----
+
+La chaîne de recherche est :
+
+. Fichier de langue choisi
+. Anglais (`en.py`) — repli si la clé est absente dans la langue choisie
+. La chaîne de clé elle-même — repli si absente en anglais aussi (visible en développement)
+
+WARNING: `t()` lit `app.storage.user['lang']` depuis la session de requête NiceGUI courante. Appelez-le toujours au moment du rendu (à l'intérieur d'un gestionnaire `@ui.page` ou d'un callback d'événement NiceGUI), jamais au moment de l'import du module.
+
+NOTE: Les chaînes qui contiennent des accolades `{` ou `}` littérales (par exemple, des exemples JSON dans le texte d'aide) doivent utiliser des accolades simples telles quelles. N'utilisez *pas* l'échappement `{{` / `}}` — `t()` n'appelle `.format(**kwargs)` que lorsque des arguments nommés sont passés, donc `{{` serait affiché littéralement.
+
+==== Conventions de nommage des clés
+
+Les clés utilisent des espaces de noms séparés par des points :
+
+[cols="1,2,2"]
+|===
+|Préfixe |Portée |Exemple
+
+|`nav.*`
+|Étiquettes du tiroir de navigation
+|`nav.dashboard`
+
+|`btn.*`
+|Étiquettes des boutons
+|`btn.subscribe`
+
+|`sidebar.*`
+|Panneau latéral d'abonnement
+|`sidebar.save_directory`
+
+|`catalogue.*`
+|Vue catalogue
+|`catalogue.search_label`
+
+|`tree.*`
+|Vue arborescence
+|`tree.filter_label`
+
+|`subscriptions.*`
+|Vue Gérer les abonnements
+|`subscriptions.folder`
+
+|`settings.*`
+|Vue Paramètres
+|`settings.title`
+
+|`manual.*`
+|Vue Abonnement manuel
+|`manual.topic_label`
+
+|`manual.val.*`
+|Messages de validation Abonnement manuel
+|`manual.val.topic_required`
+
+|`dialog.*`
+|Titres de dialogue
+|`dialog.confirm_title`
+
+|`metadata.*`
+|Dialogue de métadonnées
+|`metadata.title`
+
+|`validation.*`
+|Messages de validation partagés
+|`validation.date_format`
+
+|`footer.*`
+|Pied de page
+|`footer.copyright`
+
+|`aria.*`
+|Étiquettes d'accessibilité ARIA
+|`aria.toggle_nav`
+|===
+
+==== Prise en charge RTL
+
+L'arabe (`ar`) est de droite à gauche. Lorsque l'arabe est sélectionné, `is_rtl()` retourne `True` et le gestionnaire `on_connect()` de `main.py` injecte `dir="rtl"` sur l'élément `<html>` via JavaScript, activant le mode de mise en page RTL de Quasar. Les remplacements CSS personnalisés dans `assets/base.css` (sous le bloc de commentaires `RTL overrides`) corrigent le rembourrage physique de Quasar sur `.q-page-container` et repositionnent le panneau latéral d'abonnement.
+
+Pour ajouter une autre langue RTL, ajoutez son code à `RTL_LANGUAGES` dans `__init__.py` — aucune autre modification n'est nécessaire.
+
+==== Ajout d'une nouvelle langue
+
+.Étape 1 — Créer le fichier de langue
+Copiez `modules/ui/i18n/en.py` vers `modules/ui/i18n/{code}.py` et traduisez toutes les valeurs. Conservez chaque clé ; n'en supprimez aucune. Préservez exactement les noms `{placeholder}` tels qu'ils apparaissent dans la source anglaise :
+
+[source,python]
+----
+# modules/ui/i18n/de.py
+"""German strings."""
+
+STRINGS: dict[str, str] = {
+    'nav.dashboard':        'Dashboard',
+    'nav.catalogue':        'Katalogsuche',
+    'nav.tree':             'Baumsuche',
+    'nav.manual':           'Manuell abonnieren',
+    'nav.manage':           'Abonnements verwalten',
+    'nav.settings':         'Einstellungen',
+    # ... all remaining keys ...
+    'subscriptions.folder': 'Ordner: {path}',   # {path} must be preserved
+    'settings.records':     '{name}: {count} Einträge',
+}
+----
+
+.Étape 2 — Enregistrer la langue dans `__init__.py`
+[source,python]
+----
+from . import ar, de, en, es, fr, ru, zh        # <1>
+
+LANGUAGES: dict[str, str] = {
+    'en': 'English',
+    'fr': 'Français',
+    'es': 'Español',
+    'ar': 'العربية',
+    'zh': '中文',
+    'ru': 'Русский',
+    'de': 'Deutsch',                             # <2>
+}
+
+_STRINGS: dict[str, dict[str, str]] = {
+    'en': en.STRINGS,
+    'fr': fr.STRINGS,
+    'es': es.STRINGS,
+    'ar': ar.STRINGS,
+    'zh': zh.STRINGS,
+    'ru': ru.STRINGS,
+    'de': de.STRINGS,                            # <3>
+}
+----
+<1> Ajouter l'import
+<2> Ajouter le nom d'affichage (dans le script natif)
+<3> Ajouter le mappage des chaînes
+
+.Étape 3 — Marquer comme RTL si nécessaire
+Si la langue est de droite à gauche (ex. hébreu `he`, persan `fa`) :
+[source,python]
+----
+RTL_LANGUAGES: frozenset[str] = frozenset({'ar', 'he'})
+----
+
+.Étape 4 — Redémarrer l'interface
+[source,bash]
+----
+docker-compose restart wis2downloader-ui
+----
+
+La nouvelle langue apparaîtra immédiatement dans le sélecteur de langue de l'en-tête.
+
+IMPORTANT: Les traductions non-anglaises existantes sont générées automatiquement et fournies uniquement comme point de départ. Toutes les chaînes doivent être vérifiées par un locuteur natif avant le déploiement en production, avec une attention particulière aux termes du domaine WMO/météorologique (WIS2, BUFR, GRIB, cache global, etc.) qui ont des traductions établies dans les documents officiels de l'WMO.
+
+==== Ajout de nouvelles chaînes traduisibles
+
+Lors de l'ajout de texte à n'importe quelle vue ou composant :
+
+.Étape 1 — Ajouter dans `en.py` (source de vérité)
+[source,python]
+----
+# modules/ui/i18n/en.py
+'myview.title':       'My New View',
+'myview.description': 'Showing results for {topic}.',
+----
+
+.Étape 2 — Ajouter dans tous les autres fichiers de langue
+Copiez la valeur anglaise comme espace réservé si une traduction n'est pas encore disponible. `t()` revient automatiquement à l'anglais, mais avoir la clé présente évite les lacunes dans les outils :
+
+[source,python]
+----
+# fr.py / es.py / ar.py / zh.py / ru.py
+'myview.title':       'My New View',         # TODO: translate
+'myview.description': 'Showing results for {topic}.',
+----
+
+.Étape 3 — Utiliser `t()` dans la vue
+[source,python]
+----
+from i18n import t
+
+def render(container):
+    with container:
+        ui.label(t('myview.title')).classes('page-title')
+        ui.label(t('myview.description', topic=selected_topic))
+----
+
+== Communication inter-services
+
+=== Redis PubSub (Commandes)
+
+La communication gestionnaire d'abonnements → abonné utilise Redis PubSub sur le canal `subscription_commands` :
+
+[source,json]
+----
+// Channel: subscription_commands
+
+// Subscribe command
+{
+  "action": "subscribe",
+  "topic": "cache/a/wis2/+/data/#",
+  "save_path": "all-data",
+  "filters": {"accepted_media_types": ["application/bufr"]}
+}
+
+// Unsubscribe command
+{
+  "action": "unsubscribe",
+  "topic": "cache/a/wis2/+/data/#"
+}
+----
+
+=== Tâches Celery (Téléchargements)
+
+La communication abonné → worker Celery utilise la file d'attente de tâches Celery :
+
+[source,python]
+----
+job = {
+    "topic": "cache/a/wis2/de-dwd/data/...",
+    "target": "dwd-data",
+    "filters": {"accepted_media_types": [...]},
+    "_broker": "globalbroker.meteo.fr",
+    "_received": "2026-01-28 10:15:30",
+    "_queued": "2026-01-28 10:15:30",
+    "payload": {
+        "id": "...",
+        "properties": {
+            "data_id": "...",
+            "metadata_id": "...",
+            "integrity": {"method": "sha512", "value": "..."}
+        },
+        "links": [
+            {"rel": "canonical", "href": "https://..."}
+        ]
+    }
+}
+----
+
+=== Clés Redis
+
+[cols="2,3"]
+|===
+|Modèle de clé |Objectif
+
+|`global:subscriptions`
+|Hash de tous les abonnements (sub_id → JSON `{id, topic, save_path, filter}`)
+
+|`wis2:notification:status:{type}:{id}`
+|Suivi de déduplication (types : `by-msg-id`, `by-data-id`, `by-hash`)
+
+|`wis2:notification:data:lock:{id}`
+|Verrou distribué empêchant les téléchargements en double concurrents
+
+|`gdc:cache:{name}`
+|JSON du catalogue GDC en cache (CMA, DWD, ECCC) ; TTL défini par `GDC_CACHE_TTL_SECONDS`
+
+|`wis2:metrics:{metric_name}`
+|Hash des métriques Prometheus (champ = dict JSON d'étiquettes, valeur = compteur/jauge flottant)
+
+|`subscriber:health:{id}`
+|Signal de santé de l'abonné
+
+|`celery`
+|File d'attente de tâches Celery (par défaut)
+|===
+
+== Extension du système
+
+=== Ajout d'une nouvelle condition de correspondance dans le moteur de filtres
+
+Le moteur de filtres se trouve dans `modules/shared/shared/filters.py`. Chaque condition de correspondance est une clé dans l'objet match distribué par `_evaluate_match()`.
+
+Pour ajouter une nouvelle condition intégrée (ex. correspondance sur un nouveau champ de métadonnées `station_id`) :
+
+1. Ajoutez le champ à `MatchContext` dans `filters.py` :
++
+[source,python]
+----
+@dataclass
+class MatchContext:
+    ...
+    station_id: str | None = None
+----
+
+2. Renseignez-le dans `_build_context()` dans `wis2.py` (avant et/ou après le téléchargement).
+
+3. Ajoutez une branche dans `_evaluate_match()` :
++
+[source,python]
+----
+if 'station_id' in match:
+    return _match_string_field(ctx.station_id, match['station_id'])
+----
+
+4. Documentez le nouveau champ dans `openapi.yml` et dans la référence de filtre du guide utilisateur.
+
+Aucune modification n'est nécessaire dans `app.py`, `command_listener.py` ou `subscriber.py` — l'objet filtre est transmis tel quel et évalué au moment du téléchargement.
+
+=== Ajout d'une nouvelle tâche
+
+1. Créez une tâche dans `modules/task_manager/task_manager/tasks/`
+2. Enregistrez dans `worker.py` autodiscover
+3. Ajoutez au flux de travail si nécessaire
+
+[source,python]
+----
+# modules/task_manager/task_manager/tasks/custom.py
+from task_manager.worker import app
+
+@app.task
+def my_custom_task(data):
+    # Process data
+    return result
+----
+
+=== Ajout d'une nouvelle métrique
+
+Les métriques sont stockées dans Redis via `shared.redis_metrics`. Pour ajouter une nouvelle métrique :
+
+1. Enregistrez-la dans le dict `METRICS` dans `modules/shared/shared/redis_metrics.py` :
++
+[source,python]
+----
+METRICS = {
+    ...
+    'my_metric_total': MetricDef(
+        name='wis2downloader_my_metric_total',
+        help='Description of the metric',
+        type='counter',
+    ),
+}
+----
+
+2. Incrémentez-la depuis n'importe quel service (compteur) ou définissez-la (jauge) :
++
+[source,python]
+----
+from shared import incr_counter, set_gauge
+
+# Compteur (ex. dans une tâche Celery)
+incr_counter('my_metric_total', {'label1': 'value', 'label2': 'value'})
+
+# Jauge (ex. dans une tâche planifiée)
+set_gauge('my_metric_total', {'label1': 'value'}, 42.0)
+----
+
+Seules les métriques enregistrées dans `METRICS` apparaissent dans la sortie `/metrics`.
+
+== Tests
+
+=== Exécution des tests
+
+[source,bash]
+----
+# Installer les dépendances de test
+pip install pytest pytest-cov
+
+# Exécuter les tests
+pytest modules/
+
+# Avec couverture
+pytest --cov=modules modules/
+----
+
+=== Tests manuels
+
+[source,bash]
+----
+# Démarrer les services
+docker-compose up -d
+
+# Créer un abonnement de test
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/de-dwd/data/#", "target": "test"}'
+
+# Surveiller les journaux
+docker-compose logs -f subscriber celery
+
+# Vérifier les téléchargements
+ls -la downloads/test/
+----
+
+== Configuration du développement
+
+=== Développement local
+
+[source,bash]
+----
+# Créer un environnement virtuel
+python -m venv venv
+source venv/bin/activate
+
+# Installer les modules en mode éditable
+pip install -e modules/shared
+pip install -e modules/task_manager
+pip install -e modules/subscriber
+pip install -e modules/subscription_manager
+
+# Démarrer Redis (instance unique pour le développement)
+docker run -d -p 6379:6379 redis:7.2-alpine redis-server --requirepass devpassword
+
+# Configurer l'environnement
+export REDIS_HOST=localhost
+export REDIS_PORT=6379
+export REDIS_PASSWORD=devpassword
+export FLASK_SECRET_KEY=dev-secret-key
+export LOG_LEVEL=DEBUG
+
+# Exécuter le gestionnaire d'abonnements
+python -m subscription_manager.app
+
+# Exécuter le souscripteur (dans un autre terminal)
+export GLOBAL_BROKER_HOST=globalbroker.meteo.fr
+python -m subscriber.manager
+
+# Exécuter le worker Celery (dans un autre terminal)
+celery -A task_manager.worker worker --loglevel=DEBUG
+----
+
+=== Build Docker
+
+[source,bash]
+----
+# Construire toutes les images
+docker-compose build
+
+# Construire un service spécifique
+docker-compose build celery
+
+# Reconstruire sans cache
+docker-compose build --no-cache
+----
+
+== Débogage
+
+=== Voir les tâches Celery
+
+[source,bash]
+----
+# Inspecter les tâches actives
+docker exec -it wis2downloader-celery-1 \
+  celery -A task_manager.worker inspect active
+
+# Inspecter les tâches réservées
+docker exec -it wis2downloader-celery-1 \
+  celery -A task_manager.worker inspect reserved
+----
+
+=== Inspection Redis
+
+[source,bash]
+----
+# Se connecter à Redis (utiliser le mot de passe de l'environnement)
+docker exec -it redis redis-cli -a $REDIS_PASSWORD
+
+# Lister les abonnements
+HGETALL global:all_subscriptions
+
+# Vérifier la longueur de la file d'attente
+LLEN celery
+
+# Voir les clés de déduplication
+KEYS wis2:notifications:*
+
+# Voir le cache du catalogue GDC (rempli par l'interface au démarrage)
+KEYS gdc:cache:*
+TTL gdc:cache:CMA
+----
+
+NOTE: Toutes les commandes Redis nécessitent une authentification. Le drapeau `-a $REDIS_PASSWORD` transmet le mot de passe depuis votre environnement.
+
+=== Débogage MQTT
+
+[source,bash]
+----
+# S'abonner manuellement à un sujet (mosquitto-clients)
+mosquitto_sub -h globalbroker.meteo.fr -p 443 \
+  -t 'cache/a/wis2/de-dwd/data/#' \
+  -u everyone -P everyone \
+  --capath /etc/ssl/certs
+----

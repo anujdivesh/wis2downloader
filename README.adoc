@@ -1,0 +1,165 @@
+NOTE: The previous wis2downloader Python package has been archived to https://github.com/world-Meteorological-Organization/wis2downloader-v1.
+
+= WIS2 Downloader
+:toc: macro
+:toc-title: Contents
+:toclevels: 2
+:icons: font
+:source-highlighter: highlight.js
+
+A scalable system for downloading data from WIS2 (WMO Information System 2.0) Global Brokers.
+
+toc::[]
+
+== Overview
+
+WIS2 Downloader subscribes to MQTT topics on WIS2 Global Brokers, receives notification messages, and downloads the referenced data files. It features:
+
+* **Reliability** - Redis-backed state with automatic reconnection
+* **Scalability** - Celery workers for parallel downloads
+* **Deduplication** - Prevents duplicate downloads via message ID, data ID, and file hash tracking
+* **Filtering** - Filter by media type at subscription level
+* **Monitoring** - Prometheus metrics and Grafana dashboards
+* **Centralized Logging** - Loki for log aggregation
+
+== Architecture
+
+[source]
+----
+                                    ┌─────────────────┐
+                                    │  WIS2 Global    │
+                                    │  Broker (MQTT)  │
+                                    └────────┬────────┘
+                                             │
+                                             ▼
+┌─────────────┐    Redis PubSub    ┌─────────────────┐
+│ Subscription│◄──────────────────►│   Subscriber    │
+│   Manager   │    (commands)      │   (MQTT Client) │
+│  (REST API) │                    └────────┬────────┘
+└──────┬──────┘                             │
+       │                                    │ Celery Task
+       │ Metrics                            ▼
+       │                           ┌─────────────────┐
+       ▼                           │  Celery Worker  │
+┌─────────────┐                    │  (Downloads)    │
+│ Prometheus  │◄───────────────────┤                 │
+└──────┬──────┘    Metrics         └────────┬────────┘
+       │                                    │
+       ▼                                    ▼
+┌─────────────┐                    ┌─────────────────┐
+│   Grafana   │                    │   File System   │
+└─────────────┘                    │   (/data)       │
+                                   └─────────────────┘
+
+              ┌─────────────────────────────────┐
+              │             Redis               │
+              │    (State + Task Queue)         │
+              └─────────────────────────────────┘
+----
+
+== Quick Start
+
+[source,bash]
+----
+# Clone and configure
+git clone https://github.com/World-Meteorological-Organization/wis2downloader.git
+cd wis2downloader
+cp default.env .env  # Customize if needed
+
+# Set up downloads directory permissions (containers run as UID 10001)
+# Note - this is only required when run on a Linux workstation/server.
+sudo groupadd -g 988 wis2
+sudo useradd -u 10001 -g wis2 -M -s /usr/sbin/nologin wis2
+mkdir -p downloads && sudo chown wis2:wis2 downloads
+
+# Start services
+docker compose up -d
+
+# Create a subscription
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "surface-obs"
+  }'
+
+# View downloaded files
+ls -la downloads/surface-obs/
+----
+
+NOTE: The containers run as a non-root user (UID 10001, GID 988). If you encounter permission errors writing to the downloads directory, see link:docs/admin-guide.adoc#_volume_permissions[Volume Permissions] in the Admin Guide for alternative approaches including ACLs.
+
+== Documentation
+
+[cols="1,3"]
+|===
+|Document |Description
+
+|link:docs/admin-guide.adoc[Admin Guide]
+|Deployment, configuration, environment variables, monitoring
+
+|link:docs/user-guide.adoc[User Guide]
+|Creating subscriptions, filtering, viewing downloads
+
+|link:docs/api-reference.adoc[API Reference]
+|REST API documentation (also available via Swagger UI at `/swagger`)
+
+|link:docs/developer-guide.adoc[Developer Guide]
+|Architecture, module documentation, extending the system
+|===
+
+== Services
+
+[cols="1,1,3"]
+|===
+|Service |Port |Description
+
+|subscription-manager
+|5002
+|REST API for managing subscriptions, Prometheus metrics endpoint
+
+|subscriber
+|-
+|MQTT client connecting to WIS2 Global Broker
+
+|celery
+|-
+|Background workers processing download tasks
+
+|grafana
+|3000
+|Metrics visualization (admin/admin)
+
+|redis
+|6379 (internal)
+|Redis for state storage and task queue
+|===
+
+== Configuration
+
+Key environment variables (see link:docs/admin-guide.adoc[Admin Guide] for complete list):
+
+[cols="2,1,3"]
+|===
+|Variable |Default |Description
+
+|`GLOBAL_BROKER_HOST`
+|-
+|WIS2 Global Broker hostname (required)
+
+|`DATA_PATH`
+|`/data`
+|Base directory for downloaded files
+
+|`LOG_LEVEL`
+|`DEBUG`
+|Logging verbosity
+
+|`GC_EXCLUDE`
+|-
+|Comma-separated list of global caches to exclude
+|===
+
+== License
+
+See LICENSE file.

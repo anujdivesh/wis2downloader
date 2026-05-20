@@ -1,0 +1,920 @@
+= Guía del usuario de WIS2 Downloader
+:toc: left
+:toc-title: Contenido
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+== Introducción
+
+WIS2 Downloader descarga automáticamente datos desde las memorias caché globales WIS2 (WMO Information System 2.0) en función de sus suscripciones. Usted crea suscripciones para especificar qué temas de datos le interesan, y el sistema gestiona la descarga y organización de los archivos.
+
+Las suscripciones pueden crearse a través de la interfaz web del navegador (recomendado) o directamente mediante la API REST.
+
+== Interfaz web
+
+La interfaz web está disponible en `http://<host>:8080` (de forma predeterminada `http://localhost:8080` cuando se ejecuta localmente). El host y el puerto reales dependen de cómo esté desplegado el sistema — consulte con su administrador si accede a una instancia compartida.
+
+Proporciona una forma visual de descubrir los conjuntos de datos WIS2 disponibles, explorar la jerarquía de temas y crear suscripciones sin usar directamente la API REST.
+
+=== Idioma de la interfaz
+
+El selector de idioma en la esquina superior derecha del encabezado cambia el idioma de la interfaz. El idioma seleccionado se recuerda para su sesión de navegador.
+
+Idiomas compatibles:
+
+[cols="1,1"]
+|===
+|Idioma |Dirección del script
+
+|English
+|Izquierda a derecha
+
+|Français (French)
+|Izquierda a derecha
+
+|Español (Spanish)
+|Izquierda a derecha
+
+|العربية (Arabic)
+|Derecha a izquierda
+
+|中文 (Chinese)
+|Izquierda a derecha
+
+|Русский (Russian)
+|Izquierda a derecha
+|===
+
+NOTE: Las traducciones de la interfaz son generadas automáticamente. Si nota una traducción inexacta, especialmente en términos WMO/meteorológicos, infórmelo a través del rastreador de problemas del proyecto.
+
+=== Navegación
+
+El cajón de navegación a la izquierda (a la derecha en modo RTL árabe) da acceso a seis vistas. Cada una también es accesible mediante un atajo de teclado:
+
+[cols="1,1,3"]
+|===
+|Atajo |Vista |Descripción
+
+|kbd:[Alt+1]
+|*Panel de control*
+|Paneles integrados que muestran tasas de descarga, profundidad de cola y totales de bytes en tiempo real
+
+|kbd:[Alt+2]
+|*Vista de catálogo*
+|Búsqueda de texto completo en los tres catálogos de descubrimiento globales (GDC) con filtrado por política de datos, palabras clave y bounding box
+
+|kbd:[Alt+3]
+|*Vista de árbol*
+|Explore la jerarquía completa de temas WIS2 como un árbol navegable y seleccione un tema para abrir el panel lateral de suscripción
+
+|kbd:[Alt+4]
+|*Suscripción manual*
+|Introduzca un tema, directorio de guardado y filtro directamente sin explorar el catálogo
+
+|kbd:[Alt+5]
+|*Gestionar suscripciones*
+|Lista todas las suscripciones activas y permite cancelar la suscripción a temas
+
+|kbd:[Alt+6]
+|*Configuración*
+|Ver recuentos de registros GDC por catálogo y activar una actualización manual de datos
+|===
+
+=== Vista de catálogo
+
+La vista de catálogo consulta registros obtenidos de los tres catálogos de descubrimiento globales WIS2 (CMA, DWD, ECCC), fusionados en una única lista deduplicada.
+
+==== Filtros de búsqueda
+
+[cols="1,3"]
+|===
+|Filtro |Descripción
+
+|Texto de búsqueda
+|Coincide con ID de conjunto de datos, título, descripción, versión, palabras clave y conceptos temáticos
+
+|Política de datos
+|`all` (predeterminado), `core` o `recommended` — basado en la Política de Datos Unificada de WMO
+
+|Palabras clave
+|Lista separada por comas; todas las palabras clave deben aparecer en el registro
+
+|Bounding box
+|Grados decimales Norte/Oeste/Este/Sur; devuelve registros cuya geometría intersecte el cuadro
+|===
+
+Haga clic en *Filtrar* para ejecutar la búsqueda. Los resultados están paginados de diez en diez.
+
+==== Tarjetas de resultados
+
+Cada tarjeta de resultado muestra:
+
+* Título del conjunto de datos e ID del registro
+* Insignia de política de datos (`core` = verde, `recommended` = rojo)
+* Chips de catálogo fuente (CMA = azul, DWD = verde azulado, ECCC = naranja)
+* Un icono de advertencia si el contenido del registro difiere entre catálogos
+* *Mostrar metadatos* — abre un diálogo con los detalles completos del registro y un mapa interactivo del alcance geográfico del conjunto de datos
+* *Seleccionar* / *Deseleccionar* — agrega o elimina el tema MQTT del conjunto de datos en el panel lateral de suscripción
+
+=== Vista de árbol
+
+La vista de árbol muestra la jerarquía completa de temas WIS2 derivada de todos los registros GDC cargados. Expanda los nodos para navegar hasta los temas individuales. Escriba en el cuadro de filtro en la parte superior para buscar entre todas las etiquetas de nodos. Haga clic en un nodo hoja para abrir el panel lateral de suscripción.
+
+NOTE: Solo un tema puede estar activo a la vez en la vista de árbol.
+
+=== Crear una suscripción desde la interfaz
+
+Cuando se selecciona un tema (desde la vista de catálogo o la vista de árbol), el panel lateral de suscripción se abre a la derecha.
+
+[cols="1,3"]
+|===
+|Campo |Descripción
+
+|Temas seleccionados
+|El/los tema(s) MQTT activo(s)
+
+|Directorio de guardado
+|Ruta bajo `/data` donde se guardarán los archivos (predeterminado `./`)
+
+|Conjuntos de datos
+|Filtrar descargas a conjuntos de datos específicos; bloqueado al registro seleccionado en la vista de catálogo
+
+|Tipos de medios
+|Restringir descargas por tipo MIME
+
+|Bounding box
+|Filtro espacial aplicado en el momento de la descarga
+
+|Rango de fecha y hora
+|Filtro temporal aplicado en el momento de la descarga
+
+|Filtros personalizados
+|Campos de filtro específicos del conjunto de datos de los metadatos de enlace del registro GDC (solo vista de catálogo)
+|===
+
+Haga clic en *Suscribirse* para abrir un diálogo de confirmación que muestra la carga útil JSON completa. Revísela y luego haga clic en *Confirmar* para crear la suscripción, o en *Cancelar* para volver.
+
+=== Gestión de suscripciones
+
+La vista Suscripciones lista todas las suscripciones activas con sus rutas de guardado. Haga clic en *Cancelar suscripción* en cualquier entrada para eliminarla. Use *Recargar suscripciones* para actualizar la lista tras cualquier cambio realizado mediante la API.
+
+=== Configuración
+
+La vista Configuración muestra cuántos registros se cargaron desde cada GDC. Haga clic en *Actualizar datos GDC* para forzar una obtención nueva desde los tres catálogos, omitiendo la caché de Redis.
+
+== Entender los temas WIS2
+
+WIS2 usa jerarquías de temas MQTT para organizar los datos. Los temas siguen este patrón:
+
+[source]
+----
+origin/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+cache/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+----
+
+* `origin` - Datos originales del proveedor de datos
+* `cache` - Copia en caché de un caché global (recomendado por fiabilidad)
+* `{centre-id}` - Código de país/organización, precedido del código de país ISO2C
+* `{data-policy}` - Política de datos unificada WMO aplicable a los datos (core o recommended)
+* `{earth-system-domain}` - Dominio del sistema terrestre o disciplina de la política de datos unificada WMO
+
+=== Ejemplos de temas
+
+[cols="1,2"]
+|===
+|Tema |Descripción
+
+|`cache/a/wis2/de-dwd/data/#`
+|Todos los datos del Deutscher Wetterdienst
+
+|`cache/a/wis2/+/data/core/weather/surface-based-observations/#`
+|Observaciones de superficie básicas de todos los nodos WIS2
+
+|===
+
+=== Comodines
+
+[cols="1,3"]
+|===
+|Comodín |Significado
+
+|`+`
+|Coincide exactamente con un nivel (ej.: cualquier código de país)
+
+|`#`
+|Coincide con cero o más niveles (debe estar al final del tema)
+|===
+
+== Gestión de suscripciones mediante la API REST
+
+Las suscripciones también pueden gestionarse mediante programación usando la API REST. La dirección predeterminada es `http://localhost:5002`, pero el host y el puerto reales pueden variar según el despliegue.
+
+TIP: Use la interfaz Swagger en `http://<host>:5002/swagger` para la exploración interactiva de la API.
+
+=== Crear una suscripción
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "surface-obs"
+  }'
+----
+
+Respuesta:
+[source,json]
+----
+{
+  "status": "accepted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "target": "surface-obs"
+}
+----
+
+=== Parámetros de suscripción
+
+[cols="1,1,3"]
+|===
+|Parámetro |Requerido |Descripción
+
+|`topic`
+|Sí
+|Patrón de tema MQTT WIS2 con comodines
+
+|`target`
+|No
+|Subdirectorio para archivos descargados (bajo `/data`)
+
+|`filter`
+|No
+|Configuración del filtro (ver <<Filtrado>>)
+|===
+
+=== Listar suscripciones
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+Respuesta:
+[source,json]
+----
+{
+  "cache/a/wis2/+/data/core/weather/surface-based-observations/#": {
+    "a1b2c3d4-...": {
+      "save_path": "surface-obs",
+      "filter": {}
+    }
+  }
+}
+----
+
+=== Obtener detalles de una suscripción
+
+Primero liste las suscripciones para encontrar el ID de suscripción (`a1b2c3d4-...`), luego consúltela por ID:
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions/<id>
+----
+
+Respuesta:
+[source,json]
+----
+{
+  "id": "a1b2c3d4-...",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "save_path": "surface-obs",
+  "filter": {}
+}
+----
+
+=== Eliminar una suscripción
+
+[source,bash]
+----
+curl -X DELETE http://localhost:5002/subscriptions/<id>
+----
+
+NOTE: Donde `<id>` es el UUID de suscripción obtenido de `GET /subscriptions`. Si esta es la última suscripción para el tema, la conexión MQTT también se cierra.
+
+[[Filtrado]]
+== Filtrado
+
+Las suscripciones aceptan un objeto `filter` opcional que controla qué notificaciones se descargan.
+Los filtros usan reglas ordenadas — la primera regla que coincida determina el resultado.
+
+=== Estructura del filtro
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "my-filter",
+    "rules": [
+      {
+        "id": "rule-1",
+        "order": 1,
+        "match": { ... },
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": { "always": true },
+        "action": "reject"
+      }
+    ]
+  }
+}
+----
+
+Cada regla requiere:
+
+[cols="1,1,3"]
+|===
+|Campo |Requerido |Descripción
+
+|`id`
+|Sí
+|Etiqueta corta mostrada en los registros cuando la regla se activa
+
+|`order`
+|Sí
+|Las reglas se evalúan en orden ascendente — los números más bajos primero
+
+|`match`
+|Sí
+|Condición que debe ser verdadera para que se aplique la regla (ver <<condiciones-coincidencia>>)
+
+|`action`
+|Sí
+|`accept`, `reject` o `continue` (continuar a la siguiente regla)
+
+|`reason`
+|No
+|Explicación legible mostrada en registros y métricas
+|===
+
+Si ninguna regla coincide, el resultado predeterminado es **accept**.
+
+=== Comportamiento predeterminado (sin filtro)
+
+Cuando no se proporciona ningún `filter`, se ejecuta un filtro predeterminado integrado que rechaza cualquier tipo de medio que no esté en una lista de permitidos estándar (BUFR, GRIB, NetCDF, HDF5, imágenes comunes y formatos de texto). Para aceptar todo, use un filtro explícito que acepte todo:
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "accept-all",
+    "rules": [
+      {"id": "accept-all", "order": 1, "match": {"always": true}, "action": "accept"}
+    ]
+  }
+}
+----
+
+[[condiciones-coincidencia]]
+=== Condiciones de coincidencia
+
+==== Siempre / Nunca
+
+[source,json]
+----
+{"always": true}   <1>
+{"always": false}  <2>
+----
+<1> Coincide incondicionalmente — útil como regla predeterminada al final de una lista
+<2> Nunca coincide
+
+==== Campos simples
+
+Coinciden contra los metadatos disponibles en la notificación WIS2:
+
+[source,json]
+----
+{"centre_id":   {"equals": "de-dwd"}}
+{"topic":       {"pattern": "cache/a/wis2/+/data/core/weather/#"}}
+{"href":        {"regex": "\\.bufr4?$"}}
+{"data_id":     {"not_equals": "some-id"}}
+----
+
+Campos disponibles:
+
+[cols="1,3"]
+|===
+|Campo |Descripción
+
+|`centre_id`
+|Identificador del centro desde la posición 3 del tema (ej.: `de-dwd`, `ca-eccc-msc`)
+
+|`topic`
+|Cadena de tema MQTT completa
+
+|`href`
+|URL de descarga desde la notificación
+
+|`data_id`
+|`properties.data_id` desde la notificación WIS2
+
+|`metadata_id`
+|`properties.metadata_id` desde la notificación WIS2
+
+|`media_type`
+|Tipo MIME detectado del archivo descargado — **solo después de la descarga** (ver <<dos-pasadas>>)
+|===
+
+Operadores disponibles: `equals`, `not_equals`, `in`, `not_in`, `pattern` (glob), `regex`, `exists`
+
+==== Tamaño
+
+Coincide con el tamaño del archivo en bytes. El campo `size` usa sus propios operadores de unidades en bytes:
+
+[source,json]
+----
+{"size": {"gt_bytes":  104857600}}             <1>
+{"size": {"lte_bytes": 1048576}}               <2>
+{"size": {"between_bytes": [1024, 5242880]}}   <3>
+----
+<1> Mayor que 100 MB
+<2> 1 MB o menos
+<3> Entre 1 KB y 5 MB
+
+Operadores: `gt_bytes`, `gte_bytes`, `lt_bytes`, `lte_bytes`, `between_bytes`, `exists`
+
+NOTE: `size` es el recuento real de bytes descargados y solo se conoce **después** de que el archivo se haya obtenido — ver <<dos-pasadas>>.
+
+==== Bounding box geográfico
+
+Coincide si la geometría de la notificación cae dentro del cuadro. Las notificaciones sin geometría se dejan pasar.
+
+[source,json]
+----
+{"bbox": {"north": 55.0, "south": 47.0, "east": 15.0, "west": 6.0}}
+----
+
+Las cuatro coordenadas son obligatorias y están en grados decimales.
+
+==== Propiedades dinámicas de la notificación
+
+Coincide con cualquier campo dentro del objeto `properties` de la notificación WIS2 usando la clave `property`:
+
+[source,json]
+----
+{"property": "model_run",     "type": "string",   "equals": "00"}
+{"property": "forecast_hour", "type": "integer",  "lte": 48}
+{"property": "datetime",      "type": "datetime", "gte": "2024-01-01T00:00:00Z"}
+----
+
+Tipos compatibles: `string`, `integer`, `number`, `boolean`, `datetime`
+
+=== Combinadores
+
+Las condiciones pueden anidarse usando combinadores lógicos:
+
+[source,json]
+----
+{"all": [condition1, condition2]}   <1>
+{"any": [condition1, condition2]}   <2>
+{"not": condition}                  <3>
+----
+<1> Y — todas las subcondiciones deben coincidir
+<2> O — cualquier subcondición debe coincidir
+<3> NO — la subcondición no debe coincidir
+
+Ejemplo — aceptar solo ejecuciones 00Z y 12Z con pronósticos de corto alcance de un centro específico:
+
+[source,json]
+----
+{
+  "all": [
+    {"centre_id": {"equals": "ca-eccc-msc"}},
+    {"any": [
+      {"property": "model_run", "type": "string", "equals": "00"},
+      {"property": "model_run", "type": "string", "equals": "12"}
+    ]},
+    {"property": "forecast_hour", "type": "integer", "lte": 48}
+  ]
+}
+----
+
+[[dos-pasadas]]
+=== Evaluación antes y después de la descarga
+
+WARNING: `media_type` y `size` solo se conocen *después* de que el archivo ha sido descargado. Los filtros se evalúan *dos veces*: una antes de la descarga (pre-descarga) y otra después (post-descarga). Las reglas que dependen de `media_type` o `size` se omiten silenciosamente en la pasada pre-descarga.
+
+Esto significa que el siguiente filtro **rechaza todo** — la regla `media_type` nunca se activa en pre-descarga, y la regla `reject-all` se activa en su lugar:
+
+[source,json]
+----
+{
+  "rules": [
+    {"id": "accept-bufr", "order": 1,
+     "match": {"media_type": {"in": ["application/bufr"]}}, "action": "accept"},
+    {"id": "reject-all",  "order": 99,
+     "match": {"always": true}, "action": "reject"}
+  ]
+}
+----
+
+El patrón correcto es proteger la regla de rechazo con `media_type.exists`, de modo que solo se active en post-descarga cuando el tipo es realmente conocido:
+
+[source,json]
+----
+{
+  "rules": [
+    {"id": "accept-bufr", "order": 1,
+     "match": {"media_type": {"in": ["application/bufr", "application/octet-stream"]}},
+     "action": "accept"},
+    {"id": "reject-wrong-type", "order": 2,
+     "match": {"media_type": {"exists": true}},
+     "action": "reject", "reason": "Media type not allowed"}
+  ]
+}
+----
+
+Pre-descarga: ninguna regla se activa (ambas requieren un `media_type` conocido) → la descarga procede. +
+Post-descarga: la regla 1 acepta BUFR/octet-stream; la regla 2 rechaza todo lo demás.
+
+=== Tipos de medios compatibles
+
+Tipos aceptados por defecto cuando no se especifica ningún filtro:
+
+[cols="1,2"]
+|===
+|Categoría |Tipos
+
+|Formatos WMO
+|`application/bufr`, `application/grib`
+
+|Científico
+|`application/x-hdf`, `application/x-hdf5`, `application/x-netcdf`, `application/x-netcdf4`
+
+|Imágenes
+|`image/gif`, `image/jpeg`, `image/png`, `image/tiff`
+
+|Documentos
+|`application/pdf`, `application/postscript`
+
+|Texto
+|`text/plain`, `text/html`, `text/xml`, `text/csv`, `text/tab-separated-values`
+
+|Binario
+|`application/octet-stream`
+|===
+
+=== Ejemplos de filtros
+
+==== Aceptar solo BUFR y GRIB
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "wmo-formats-only",
+    "rules": [
+      {
+        "id": "accept-wmo",
+        "order": 1,
+        "match": {"media_type": {"in": ["application/bufr", "application/grib"]}},
+        "action": "accept"
+      },
+      {
+        "id": "reject-other",
+        "order": 2,
+        "match": {"media_type": {"exists": true}},
+        "action": "reject",
+        "reason": "Not a WMO format"
+      }
+    ]
+  }
+}
+----
+
+==== Rechazar archivos de más de 100 MB
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "size-limit",
+    "rules": [
+      {
+        "id": "reject-large",
+        "order": 1,
+        "match": {"size": {"gt_bytes": 104857600}},
+        "action": "reject",
+        "reason": "Exceeds 100 MB"
+      }
+    ]
+  }
+}
+----
+
+==== Datos de un centro específico, solo corto alcance
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "eccc-short-range",
+    "rules": [
+      {
+        "id": "reject-large",
+        "order": 1,
+        "match": {"size": {"gt_bytes": 104857600}},
+        "action": "reject",
+        "reason": "Exceeds 100 MB"
+      },
+      {
+        "id": "accept-short-range",
+        "order": 2,
+        "match": {
+          "all": [
+            {"property": "model_run",     "type": "string",  "in": ["00", "12"]},
+            {"property": "forecast_hour", "type": "integer", "lte": 48}
+          ]
+        },
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": {"always": true},
+        "action": "reject"
+      }
+    ]
+  }
+}
+----
+
+==== Filtro de área geográfica
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "europe-only",
+    "rules": [
+      {
+        "id": "accept-europe",
+        "order": 1,
+        "match": {"bbox": {"north": 71.0, "south": 34.0, "east": 40.0, "west": -25.0}},
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": {"always": true},
+        "action": "reject",
+        "reason": "Outside European bounding box"
+      }
+    ]
+  }
+}
+----
+
+== Archivos descargados
+
+=== Organización de archivos
+
+Los archivos se organizan bajo su directorio destino en un subdirectorio `YYYY/MM/DD` basado en la fecha en que el archivo fue *descargado* (no el tiempo de observación ni el tiempo de validez de los datos):
+
+[source]
+----
+/data/
+└── surface-obs/           # Your target directory
+    └── 2026/
+        └── 03/
+            └── 05/        # Date downloaded (UTC)
+                ├── SYNOP_20260305T120000.bufr
+                ├── SYNOP_20260305T121500.bufr
+                └── ...
+----
+
+NOTE: La fecha del directorio refleja cuándo llegó el archivo, no cuándo se produjeron los datos ni para qué período son válidos. Los archivos de períodos de observación más antiguos que lleguen tarde aparecerán en el directorio correspondiente a su fecha de descarga.
+
+=== Nomenclatura de archivos
+
+Los archivos conservan sus nombres originales de la URL de descarga. Si ya existe un archivo con el mismo nombre y no es una actualización, la descarga se omite.
+
+=== Ver descargas
+
+[source,bash]
+----
+# Listar descargas recientes
+ls -la downloads/surface-obs/$(date +%Y/%m/%d)/
+
+# Contar archivos por tipo
+find downloads/ -name "*.bufr" | wc -l
+
+# Tamaño total
+du -sh downloads/
+----
+
+NOTE: `du` informa el uso de disco basándose en la asignación de bloques del sistema de archivos, no en el recuento de bytes en bruto. Muchos archivos pequeños (como los boletines BUFR) consumen un bloque completo cada uno independientemente de su tamaño real, por lo que los resultados de `du` serán típicamente mayores que la suma de los tamaños de archivos individuales indicados por `ls -la`.
+
+== Monitoreo
+
+=== Comprobación de estado
+
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+Respuesta:
+[source,json]
+----
+{"status": "healthy"}
+----
+
+=== Métricas
+
+Ver estadísticas de descarga:
+
+[source,bash]
+----
+# Total de descargas
+curl -s http://localhost:5002/metrics | grep wis2downloader_downloads_total
+
+# Descargas fallidas
+curl -s http://localhost:5002/metrics | grep wis2downloader_failed_total
+
+# Profundidad de la cola
+curl -s http://localhost:5002/metrics | grep wis2downloader_celery_queue_length
+----
+
+=== Vista de panel de control
+
+El panel de control integrado (kbd:[Alt+1]) muestra tasas de descarga, profundidad de cola, uso de disco y totales de bytes en tiempo real. No se requiere inicio de sesión adicional.
+
+TIP: El panel de control está integrado directamente en la interfaz web — no es necesario abrir Grafana por separado.
+
+== Casos de uso comunes
+
+=== Suscribirse a todas las observaciones de superficie
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "synop"
+  }'
+----
+
+=== Suscribirse a un país específico
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/de-dwd/data/#",
+    "target": "dwd"
+  }'
+----
+
+=== Descargar solo archivos BUFR y GRIB
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/#",
+    "target": "wmo-formats",
+    "filter": {
+      "name": "wmo-formats-only",
+      "rules": [
+        {
+          "id": "accept-wmo",
+          "order": 1,
+          "match": {"media_type": {"in": ["application/bufr", "application/grib"]}},
+          "action": "accept"
+        },
+        {
+          "id": "reject-other",
+          "order": 2,
+          "match": {"media_type": {"exists": true}},
+          "action": "reject",
+          "reason": "Not a WMO format"
+        }
+      ]
+    }
+  }'
+----
+
+=== Suscripciones múltiples
+
+Cree suscripciones separadas para diferentes tipos de datos:
+
+[source,bash]
+----
+# Observaciones de superficie
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#", "target": "surface"}'
+
+# Viento en altura
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/upper-air-observations/#", "target": "upper-air"}'
+
+# Pronósticos
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/prediction/#", "target": "forecasts"}'
+----
+
+== Solución de problemas
+
+=== Sin archivos descargados
+
+1. Verifique que existe la suscripción:
++
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+2. Verifique el estado del sistema:
++
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+3. Verifique las descargas omitidas (métricas):
++
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep skipped
+----
+
+=== Archivos siendo omitidos
+
+Compruebe el motivo de omisión en las métricas:
+
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep wis2downloader_skipped_total
+----
+
+Motivos comunes:
+
+* `PreviouslyProcessed` - Archivo ya descargado (deduplicación)
+* `FilterRejected` - Rechazado por una regla de filtro
+* `GlobalCacheBlacklisted` - Caché excluido mediante `GC_EXCLUDE`
+
+=== Tipos de archivos incorrectos descargados
+
+Elimine la suscripción existente y vuelva a crearla con un filtro `media_type`. Use `media_type.exists` como guardia de rechazo — no `always: true` — para que la regla de rechazo solo se active después de que se conozca el tipo de archivo (ver <<dos-pasadas>>):
+
+[source,bash]
+----
+# Listar suscripciones para encontrar el UUID
+curl http://localhost:5002/subscriptions
+
+# Eliminar suscripción antigua por UUID
+curl -X DELETE http://localhost:5002/subscriptions/<id>
+
+# Crear nueva suscripción con filtro
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "your-topic",
+    "target": "your-target",
+    "filter": {
+      "name": "bufr-only",
+      "rules": [
+        {
+          "id": "accept-bufr",
+          "order": 1,
+          "match": {"media_type": {"in": ["application/bufr", "application/octet-stream"]}},
+          "action": "accept"
+        },
+        {
+          "id": "reject-other",
+          "order": 2,
+          "match": {"media_type": {"exists": true}},
+          "action": "reject",
+          "reason": "Media type not allowed"
+        }
+      ]
+    }
+  }'
+----
+
+=== Todo siendo rechazado por el filtro
+
+Si todas las notificaciones son rechazadas con el motivo `FilterRejected`, la causa más común es una regla de rechazo `always: true` que se activa en pre-descarga antes de que se conozca `media_type`.
+
+Compruebe su filtro: si tiene una regla de aceptación `media_type` seguida de una regla de rechazo `always: true`, la regla de aceptación nunca se activará en pre-descarga porque `media_type` solo se conoce después de la descarga. Reemplace el rechazo `always: true` por `media_type.exists: true` — ver <<dos-pasadas>>.

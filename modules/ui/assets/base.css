@@ -1,0 +1,529 @@
+@layer components {
+
+/* -- Layout ---------------------------------------------------- */
+
+#app {
+    margin: 0 auto;
+    transform: translateZ(0);
+}
+
+.nicegui-content {
+    padding: 0rem !important;
+    overflow: hidden !important;
+}
+
+.page-body-row {
+    width: 100%;
+    height: calc(100vh - 205px);
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    padding-left: 1rem !important;
+}
+
+.content-area {
+    flex: 1 1 auto;
+    margin-left: auto;
+    margin-right: auto;
+    overflow-y: auto;
+    width: 100% !important;
+}
+
+.card-map {
+    width: 60%;
+    height: 200px;
+    margin-left: auto !important;
+    margin-right: 0 !important;
+}
+
+body, .q-layout {
+  overflow-x: hidden;
+}
+
+/* -- Header ---------------------------------------------------- */
+
+.header-bg {
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    line-height: 0 !important;
+    overflow: hidden !important;
+    background: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+.header-banner {
+    width: 100vw;
+    display: block;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+}
+
+.header-banner {
+    height: 120px;
+    object-fit: cover;
+}
+
+.header-divider {
+    height: 11px;
+    margin-top: -17px !important;
+}
+
+.header-logo {
+    position: absolute !important;
+    left: 20px !important;
+    top: 20px !important;
+    width: 80px !important;
+    height: 80px !important;
+    line-height: 0 !important;
+}
+
+.header-toolbar {
+    width: 100%;
+    background: rgba(32, 106, 170, 0.95);
+    display: flex !important;
+    align-items: center;
+    line-height: normal !important;
+    margin-top: -22px !important;
+}
+
+/* -- Footer ---------------------------------------------------- */
+
+.q-footer {
+    background: rgba(32, 106, 170, 0.95) !important;
+    box-shadow: 0 -2px 12px 0 rgba(31, 38, 135, 0.10) !important;
+    height: 30px;
+    width: 100%;
+}
+
+.footer-divider {
+    margin-top: -16px !important;
+    height: 11px;
+}
+
+.footer-copyright {
+    color: white;
+    margin-left: 10px;
+    font-size: 12px;
+    margin-top: -18px;
+}
+
+/* -- Labels ---------------------------------------------------- */
+
+.page-title,
+.sidebar-title {
+    font-weight: bold;
+    font-size: 16px;
+    color: #4A72C3;
+}
+
+
+.no-results-label {
+    margin-top: 10px;
+    font-weight: bold;
+    color: black;
+}
+
+.result-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1e293b;
+    flex: 1;
+    word-break: break-word;
+}
+
+.result-subtitle {
+    font-size: 0.78rem;
+    color: #64748b;
+    word-break: break-all;
+    margin-bottom: 8px;
+}
+
+.result-description {
+    font-weight: normal;
+    color: #334155;
+    text-overflow: ellipsis;
+    word-wrap: break-word;
+    overflow: hidden;
+    max-height: 4.5em;
+}
+
+.result-actions {
+    margin-top: 8px;
+    gap: 8px !important;
+    flex-wrap: wrap;
+}
+
+/* -- Chip ------------------------------------------------------ */
+
+.selected-topic-chip {
+    background: linear-gradient(90deg, #2563eb 60%, #77AEE4 100%) !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+    border-radius: 7px !important;
+    padding: 2px 10px !important;
+    font-size: 0.85rem !important;
+    margin: 2px 4px 2px 0 !important;
+    box-shadow: 0 1px 4px 0 rgba(31,38,135,0.10) !important;
+    border: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+/* -- Right sidebar content ------------------------------------- */
+
+.directory-input {
+    margin-top: 10px;
+    width: 100%;
+}
+
+.sidebar-section-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 4px;
+}
+
+.filter-expansion {
+    width: 100%;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    margin-top: 6px;
+}
+
+.bbox-grid {
+    width: 100%;
+    gap: 4px !important;
+}
+
+.sidebar-btn {
+    margin-top: 10px;
+}
+
+.subscribe-btn {
+    width: 100%;
+    margin-top: 4px;
+    margin-bottom: 16px;
+}
+
+
+/* -- Settings page --------------------------------------------- */
+
+.settings-card {
+    width: 100%;
+    margin-bottom: 16px !important;
+}
+
+
+/* -- Info / prompt card ---------------------------------------- */
+
+.info-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    max-width: 480px;
+    padding: 20px !important;
+}
+
+.info-card-icon {
+    font-size: 2rem !important;
+    color: #2563eb !important;
+}
+
+/* -- Search form ----------------------------------------------- */
+
+.search-form-card {
+    width: 100% !important;
+    max-width: 800px;
+    margin-bottom: 16px !important;
+}
+
+.filter-row {
+    flex-wrap: wrap;
+    gap: 12px !important;
+    align-items: flex-end !important;
+    margin-top: 4px;
+}
+
+.bbox-label {
+    align-self: center;
+    font-weight: 600;
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.search-input {
+    width: 100%;
+    min-width: 300px;
+}
+
+.filter-select {
+    width: 160px;
+}
+
+.filter-input {
+    width: 200px;
+}
+
+.bbox-input {
+    width: 90px;
+}
+
+.subscription-action-btn {
+    margin-left: 10px;
+}
+
+/* -- Search results -------------------------------------------- */
+
+.results-column {
+    width: 100%;
+    max-width: 800px;
+}
+
+.page-selector {
+    width: 10vh;
+}
+
+.result-card {
+    width: 100%;
+}
+
+.result-card-header {
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    flex-wrap: nowrap !important;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
+.result-row {
+    width: 100%;
+    align-items: flex-start !important;
+}
+
+.result-details {
+    flex: 1;
+    min-width: 0;
+}
+
+
+/* -- Tree view ------------------------------------------------- */
+
+.tree-scroll {
+    height: 90vh;
+}
+
+/* -- Subscriptions page ---------------------------------------- */
+
+.reload-btn {
+    margin-left: 10px;
+    font-weight: bold;
+}
+
+.subscriptions-scroll {
+    height: 80vh;
+}
+
+/* -- Cards ----------------------------------------------------- */
+
+.nicegui-card, .q-card {
+    background: #ffffff !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.10) !important;
+    border-radius: 4px !important;
+    border: 1px solid rgba(0,0,0,0.08) !important;
+    margin-bottom: 16px !important;
+    transition: box-shadow 0.2s;
+}
+.nicegui-card:hover, .q-card:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.14) !important;
+}
+
+/* -- Nav drawer ------------------------------------------------ */
+
+.menu-nav-item {
+    border-radius: 7px !important;
+    margin: 2px 4px !important;
+}
+
+.q-drawer--mini {
+    overflow: hidden !important;
+    width: calc(32px + 2rem) !important;
+}
+
+
+/* -- Grafana iframe -------------------------------------------- */
+
+.grafana-frame {
+    width: 100%;
+    height: calc(100vh - 205px - 2rem) !important; /* subtract header (~185px) + footer (30px) */
+    border: none;
+    display: block;
+    padding: 0px;
+}
+
+/* -- Form inputs ----------------------------------------------- */
+
+.q-input, .q-select, .q-number {
+    border-radius: 10px !important;
+    background: rgba(255,255,255,0.85) !important;
+    border: 1px solid #e0e7ef !important;
+    box-shadow: 0 1px 4px 0 rgba(31, 38, 135, 0.06) !important;
+    transition: border 0.2s, box-shadow 0.2s;
+    padding: 0 12px !important;
+}
+.q-field__control:focus-within, .q-input:focus-within, .q-select:focus-within, .q-number:focus-within {
+    border: 1.5px solid #2563eb !important;
+    box-shadow: 0 2px 8px 0 rgba(31, 38, 135, 0.12) !important;
+}
+
+/* -- Base labels ----------------------------------------------- */
+
+label, .q-label {
+    font-size: 1.08rem !important;
+    font-weight: 500 !important;
+    color: #1e293b !important;
+    letter-spacing: 0.01em;
+}
+
+/* -- Rows ------------------------------------------------------ */
+
+.q-row {
+    gap: 18px !important;
+    align-items: center !important;
+}
+
+/* -- Checkboxes ------------------------------------------------ */
+
+.q-checkbox__inner {
+    background: #fff !important;
+    position: relative !important;
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+    min-height: 20px !important;
+    transition: background 0.2s, border 0.2s;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: visible !important;
+}
+.q-checkbox__inner--checked {
+    background: #2563eb !important;
+    border-color: #2563eb !important;
+}
+.q-checkbox__inner--checked::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+}
+
+/* -- Dialogs --------------------------------------------------- */
+
+.dialog-scroll {
+    min-width: min(70vw, 900px) !important;
+    height: 75vh;
+}
+
+.dialog-confirm {
+    min-width: min(70vw, 900px) !important;
+    max-height: 75vh;
+}
+
+.dialog-metadata {
+    min-width: min(80vw, 1000px) !important;
+    max-height: 80vh;
+}   
+
+.dialog-input {
+    width: 20vh;
+}
+
+.keyword-btn {
+    font-size: 12px;
+}
+
+/* -- Manual subscription view ---------------------------------- */
+
+.manual-sub-card {
+    width: 100%;
+    margin-bottom: 16px !important;
+}
+
+.manual-sub-card .q-card__section {
+    width: 100%;
+}
+
+.filter-textarea {
+    width: 100% !important;
+}
+
+.filter-textarea textarea {
+    font-family: monospace !important;
+    font-size: 0.85rem !important;
+    min-height: 200px;
+}
+
+.q-dialog {
+    border-radius: 18px !important;
+    background: rgba(255,255,255,0.95) !important;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.18) !important;
+}
+
+/* -- Focus indicators (WCAG 2.1 AA) -------------------------------- */
+
+:focus-visible {
+    outline: 2px solid #2563eb !important;
+    outline-offset: 2px !important;
+}
+
+.q-btn:focus-visible {
+    outline: 2px solid #2563eb !important;
+    outline-offset: 2px !important;
+}
+
+/* -- Language selector in header ----------------------------------- */
+
+.lang-select {
+    min-width: 100px;
+    color: #fff !important;
+    background-color: #2f6cbc !important;
+}
+
+.lang-select .q-field__native,
+.lang-select .q-field__label {
+    color: #fff !important;
+}
+
+/* -- Docs iframe ----------------------------------------------- */
+
+.docs-frame {
+    width: calc(100% - 32px - 2rem);
+    height: calc(100vh - 205px - 2rem);
+    border: none;
+    display: block;
+    padding: 0;
+}
+
+/* -- RTL overrides ------------------------------------------------- */
+[dir="rtl"]:has(.q-drawer--left.q-drawer--mini) .q-page-container {
+    padding-left: 0 !important;
+    padding-right: calc(32px + 2rem) !important;
+}
+
+[dir="rtl"]:has(.q-drawer--left:not(.q-drawer--mini)) .q-page-container {
+    padding-left: 0 !important;
+    padding-right: 250px !important;
+}
+
+[dir="rtl"] .page-body-row {
+    padding-left: 0 !important;
+    padding-right: 1rem !important;
+}
+
+
+}

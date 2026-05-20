@@ -1,0 +1,445 @@
+openapi: 3.0.3
+x-api-id: wis2-downloader-api
+info:
+  title: WIS2 Downloader API
+  version: 3.0.0
+  description: |
+    REST API for managing WIS2 data subscriptions.
+
+    Each subscription is identified by a UUID and binds together an MQTT topic,
+    a save destination, and an optional filter. Multiple subscriptions can share
+    the same topic — the MQTT connection is opened once and messages are routed
+    to every matching subscription.
+  contact:
+    name: WIS2 Downloader
+
+servers:
+  - url: http://localhost:5002
+    description: Local development server
+
+tags:
+  - name: Subscriptions
+    description: Manage WIS2 data subscriptions
+  - name: Monitoring
+    description: Health checks and metrics
+
+paths:
+  # ==================== SUBSCRIPTIONS ====================
+  /subscriptions:
+    get:
+      tags:
+        - Subscriptions
+      summary: List all subscriptions
+      description: |
+        Returns all active subscriptions grouped by MQTT topic.
+
+        Each topic maps to a dict of subscription IDs, each containing
+        the save path and filter for that subscription.
+      operationId: listSubscriptions
+      responses:
+        "200":
+          description: Subscriptions grouped by topic
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Map of topic to subscriptions for that topic
+                additionalProperties:
+                  type: object
+                  description: Map of subscription UUID to subscription detail
+                  additionalProperties:
+                    $ref: '#/components/schemas/SubscriptionDetail'
+              example:
+                "cache/a/wis2/+/data/core/weather/surface-based-observations/#":
+                  "550e8400-e29b-41d4-a716-446655440000":
+                    save_path: "surface-obs-bufr"
+                    filter:
+                      name: "bufr-filter"
+                      rules:
+                        - id: "accept-bufr"
+                          order: 1
+                          match:
+                            media_type:
+                              equals: "application/bufr"
+                          action: "accept"
+                  "661f9511-f30c-52e5-b827-557766551111":
+                    save_path: "surface-obs-all"
+                    filter: {}
+        "503":
+          $ref: '#/components/responses/ServiceUnavailable'
+
+    post:
+      tags:
+        - Subscriptions
+      summary: Create a subscription
+      description: |
+        Subscribe to a WIS2 MQTT topic. Assigns a UUID to the subscription and
+        returns the full subscription record.
+
+        If this is the first subscription for the given topic, an MQTT connection
+        is opened. Additional subscriptions for the same topic reuse the existing
+        MQTT connection.
+
+        **Topic wildcards:**
+        - `+` matches exactly one level (e.g., centre ID)
+        - `#` matches zero or more levels (must be at the end)
+      operationId: createSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionRequest'
+            examples:
+              simple:
+                summary: Subscribe with no filter
+                value:
+                  topic: "cache/a/wis2/+/data/core/weather/surface-based-observations/#"
+                  target: "surface-obs"
+              with_filter:
+                summary: Subscribe with a rule-based filter
+                value:
+                  topic: "cache/a/wis2/+/data/core/weather/surface-based-observations/#"
+                  target: "surface-obs-bufr"
+                  filter:
+                    name: "bufr-only"
+                    rules:
+                      - id: "accept-bufr"
+                        order: 1
+                        match:
+                          media_type:
+                            equals: "application/bufr"
+                        action: "accept"
+                      - id: "default-reject"
+                        order: 999
+                        match:
+                          always: true
+                        action: "reject"
+      responses:
+        "201":
+          description: Subscription created
+          headers:
+            Location:
+              description: URL to retrieve the subscription
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "503":
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /subscriptions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Subscription UUID
+        schema:
+          type: string
+          format: uuid
+        example: "550e8400-e29b-41d4-a716-446655440000"
+
+    get:
+      tags:
+        - Subscriptions
+      summary: Get a subscription
+      description: Returns the full subscription record for the given UUID.
+      operationId: getSubscription
+      responses:
+        "200":
+          description: Subscription details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - Subscriptions
+      summary: Update a subscription
+      description: |
+        Update the save path or filter for a subscription. The topic cannot be
+        changed — delete and recreate to change the topic.
+      operationId: updateSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                target:
+                  type: string
+                  description: New subdirectory under data root
+                  example: "surface-obs-bufr-v2"
+                filter:
+                  $ref: '#/components/schemas/Filter'
+      responses:
+        "200":
+          description: Updated subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "503":
+          $ref: '#/components/responses/ServiceUnavailable'
+
+    delete:
+      tags:
+        - Subscriptions
+      summary: Delete a subscription
+      description: |
+        Remove a subscription. If this is the last subscription for its topic
+        the MQTT connection for that topic is closed.
+      operationId: deleteSubscription
+      responses:
+        "200":
+          description: Subscription deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "deleted"
+                  id:
+                    type: string
+                    format: uuid
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "503":
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  # ==================== MONITORING ====================
+  /health:
+    get:
+      tags:
+        - Monitoring
+      summary: Health check
+      description: Returns service health status including Redis connectivity
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Health status (always returns 200, check status field)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /metrics:
+    get:
+      tags:
+        - Monitoring
+      summary: Prometheus metrics
+      description: |
+        Returns metrics in Prometheus text format.
+
+        **Available metrics:**
+        - `wis2downloader_notifications_total` - Total notifications by status
+        - `wis2downloader_downloads_total` - Successful downloads by cache and media type
+        - `wis2downloader_downloads_bytes_total` - Total bytes downloaded
+        - `wis2downloader_skipped_total` - Skipped notifications by reason
+        - `wis2downloader_failed_total` - Failed downloads by cache and reason
+        - `wis2downloader_celery_queue_length` - Current tasks in queue
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Error generating metrics
+
+  /openapi:
+    get:
+      tags:
+        - Monitoring
+      summary: OpenAPI specification
+      operationId: getOpenAPI
+      responses:
+        "200":
+          description: OpenAPI 3.0 specification
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  schemas:
+    Subscription:
+      type: object
+      description: Full subscription record as stored and returned by the API
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique subscription identifier (assigned on creation)
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        topic:
+          type: string
+          description: WIS2 MQTT topic pattern
+          example: "cache/a/wis2/+/data/core/weather/surface-based-observations/#"
+        save_path:
+          type: string
+          nullable: true
+          description: Subdirectory under the data root where files are saved
+          example: "surface-obs-bufr"
+        filter:
+          $ref: '#/components/schemas/Filter'
+
+    SubscriptionDetail:
+      type: object
+      description: Subscription detail as it appears in the grouped list response (excludes id and topic, which are the enclosing keys)
+      properties:
+        save_path:
+          type: string
+          nullable: true
+          example: "surface-obs-bufr"
+        filter:
+          $ref: '#/components/schemas/Filter'
+
+    SubscriptionRequest:
+      type: object
+      required:
+        - topic
+      properties:
+        topic:
+          type: string
+          description: WIS2 MQTT topic pattern
+          example: "cache/a/wis2/+/data/core/weather/surface-based-observations/#"
+        target:
+          type: string
+          description: Subdirectory under data root where files are saved
+          example: "surface-obs"
+        filter:
+          $ref: '#/components/schemas/Filter'
+
+    Filter:
+      type: object
+      description: |
+        Hierarchical rule-based filter. Rules are evaluated in order;
+        the first matching rule's action is applied.
+      properties:
+        name:
+          type: string
+          description: Filter name for identification
+          example: "bufr-only"
+        description:
+          type: string
+          description: Human-readable description of filter purpose
+        rules:
+          type: array
+          description: Ordered list of filter rules
+          items:
+            $ref: '#/components/schemas/FilterRule'
+
+    FilterRule:
+      type: object
+      required:
+        - id
+        - order
+        - match
+        - action
+      properties:
+        id:
+          type: string
+          description: Unique rule identifier
+          example: "accept-bufr"
+        order:
+          type: integer
+          description: Execution order (lower = earlier)
+          example: 1
+        match:
+          $ref: '#/components/schemas/MatchCondition'
+        action:
+          type: string
+          enum: [accept, reject, continue]
+          description: |
+            - `accept`: Download the file
+            - `reject`: Skip the file
+            - `continue`: Log match and move to next rule
+        reason:
+          type: string
+          description: Reason logged when rule triggers
+          example: "File exceeds size limit"
+
+    MatchCondition:
+      type: object
+      description: |
+        Condition to match against notification data.
+
+        **Simple field matches:** `media_type`, `size`, `centre_id`, `data_id`,
+        `metadata_id`, `topic`, `href`, `always`
+
+        **Size operators:** `gt_bytes`, `lt_bytes`, `gte_bytes`, `lte_bytes`, `between_bytes`
+
+        **String operators:** `equals`, `not_equals`, `in`, `not_in`, `pattern`, `regex`
+
+        **Numeric operators:** `gt`, `gte`, `lt`, `lte`, `between`
+
+        **Property match (dynamic WIS2 notification fields):**
+        Specify `property` (field name) and `type` (string/integer/number/boolean/datetime)
+        plus an operator.
+
+        **Logical combinators:** `all` (AND), `any` (OR), `not`
+      additionalProperties: true
+      example:
+        all:
+          - media_type:
+              equals: "application/bufr"
+          - centre_id:
+              in: ["de-dwd", "fr-meteofrance"]
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          example: healthy
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "No topic provided"
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "No topic provided"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Subscription not found"
+
+    ServiceUnavailable:
+      description: Service unavailable (Redis connection failed)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Failed to connect to Redis: Connection refused"

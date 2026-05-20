@@ -1,0 +1,930 @@
+= دليل مستخدم WIS2 Downloader
+:toc: right
+:toc-title: المحتويات
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+:lang: ar
+:docinfo: shared
+
+
+[NOTE]
+====
+تُرجمت هذه الوثيقة آليًا من الإنجليزية باستخدام Claude AI.
+ينبغي مراجعة المصطلحات المتعلقة بمجال WMO/الأرصاد الجوية من قِبل متحدث أصلي قبل
+الاستخدام الإنتاجي. راجع link:../en/[النسخة الإنجليزية الأصلية] للاطلاع على النسخة المرجعية.
+====
+
+== المقدمة
+
+يُنزِّل WIS2 Downloader البيانات تلقائيًا من ذاكرات التخزين المؤقت العالمية لـ WIS2 (نظام معلومات WMO 2.0) استنادًا إلى اشتراكاتك. تُنشئ اشتراكات لتحديد موضوعات البيانات التي تهمك، ويتولى النظام تنزيل الملفات وتنظيمها.
+
+يمكن إنشاء الاشتراكات عبر الواجهة البرمجية المستندة إلى المتصفح (موصى به) أو مباشرةً عبر REST API.
+
+== واجهة المستخدم
+
+تتوفر واجهة المستخدم على العنوان `http://<host>:8080` (الافتراضي `http://localhost:8080` عند التشغيل محليًا). يعتمد المضيف والمنفذ الفعليان على طريقة نشر النظام — تواصل مع المسؤول إذا كنت تصل إلى نسخة مشتركة.
+
+توفر طريقة مرئية لاكتشاف مجموعات بيانات WIS2 المتاحة، واستعراض التسلسل الهرمي للموضوعات، وإنشاء الاشتراكات دون استخدام REST API مباشرةً.
+
+=== لغة الواجهة
+
+يُغيِّر منتقي اللغة في الزاوية العلوية اليمنى من الرأسية لغة الواجهة. تُحفَظ اللغة المحددة لجلسة المتصفح الخاصة بك.
+
+اللغات المدعومة:
+
+[cols="1,1"]
+|===
+|اللغة |اتجاه الكتابة
+
+|English
+|من اليسار إلى اليمين
+
+|Français (French)
+|من اليسار إلى اليمين
+
+|Español (Spanish)
+|من اليسار إلى اليمين
+
+|العربية (Arabic)
+|من اليمين إلى اليسار
+
+|中文 (Chinese)
+|من اليسار إلى اليمين
+
+|Русский (Russian)
+|من اليسار إلى اليمين
+|===
+
+NOTE: ترجمات الواجهة مُولَّدة آليًا. إذا لاحظت ترجمة غير دقيقة، ولا سيما للمصطلحات المتعلقة بـ WMO/الأرصاد الجوية، يُرجى الإبلاغ عنها عبر متتبع المشاكل في المشروع.
+
+=== التنقل
+
+يُتيح درج التنقل على اليسار (اليمين في وضع RTL العربي) الوصول إلى ست طرق عرض. كل منها قابلة للوصول أيضًا من خلال اختصار لوحة مفاتيح:
+
+[cols="1,1,3"]
+|===
+|الاختصار |طريقة العرض |الوصف
+
+|kbd:[Alt+1]
+|*لوحة التحكم*
+|لوحات Grafana مُدمَجة تعرض معدلات التنزيل وعمق قائمة الانتظار وإجماليات البايتات في الوقت الفعلي
+
+|kbd:[Alt+2]
+|*عرض الكتالوج*
+|بحث نصي كامل في الكتالوجات الثلاثة لاكتشاف البيانات العالمية (GDC) مع التصفية حسب سياسة البيانات والكلمات المفتاحية والنطاق الجغرافي
+
+|kbd:[Alt+3]
+|*عرض الشجرة*
+|استعراض التسلسل الهرمي الكامل لموضوعات WIS2 كشجرة قابلة للتنقل وتحديد موضوع لفتح الشريط الجانبي للاشتراك
+
+|kbd:[Alt+4]
+|*اشتراك يدوي*
+|إدخال موضوع ومجلد حفظ وفلتر مباشرةً دون استعراض الكتالوج
+
+|kbd:[Alt+5]
+|*إدارة الاشتراكات*
+|سرد جميع الاشتراكات النشطة وإلغاء الاشتراك في الموضوعات
+
+|kbd:[Alt+6]
+|*الإعدادات*
+|عرض أعداد سجلات GDC لكل كتالوج وتشغيل تحديث يدوي للبيانات
+|===
+
+=== عرض الكتالوج
+
+تستعلم طريقة عرض الكتالوج عن السجلات المُجلَبة من كتالوجات اكتشاف البيانات العالمية الثلاثة لـ WIS2 (CMA وDWD وECCC)، مُدمَجةً في قائمة موحدة خالية من التكرار.
+
+==== فلاتر البحث
+
+[cols="1,3"]
+|===
+|الفلتر |الوصف
+
+|نص البحث
+|يطابق معرّف مجموعة البيانات والعنوان والوصف والإصدار والكلمات المفتاحية ومفاهيم الموضوع
+
+|سياسة البيانات
+|`all` (افتراضي) أو `core` أو `recommended` — استنادًا إلى سياسة البيانات الموحدة لـ WMO
+
+|الكلمات المفتاحية
+|قائمة مفصولة بفواصل؛ يجب أن تظهر جميع الكلمات المفتاحية في السجل
+
+|النطاق الجغرافي
+|درجات عشرية شمال/غرب/شرق/جنوب؛ يُعيد السجلات التي تتقاطع هندسيتها مع المربع
+|===
+
+انقر على *تصفية* لتشغيل البحث. النتائج مُقسَّمة إلى صفحات بعشرة لكل صفحة.
+
+==== بطاقات النتائج
+
+تُظهر كل بطاقة نتيجة:
+
+* عنوان مجموعة البيانات ومعرّف السجل
+* شارة سياسة البيانات (`core` = أخضر، `recommended` = أحمر)
+* شرائح الكتالوج المصدر (CMA = أزرق، DWD = فيروزي، ECCC = برتقالي)
+* أيقونة تحذير إذا كان محتوى السجل يختلف بين الكتالوجات
+* *عرض البيانات الوصفية* — يفتح مربع حوار بتفاصيل السجل الكاملة وخريطة تفاعلية للنطاق الجغرافي لمجموعة البيانات
+* *تحديد* / *إلغاء التحديد* — يُضيف أو يُزيل موضوع MQTT لمجموعة البيانات إلى/من الشريط الجانبي للاشتراك
+
+=== عرض الشجرة
+
+تُعرض في طريقة عرض الشجرة التسلسل الهرمي الكامل لموضوعات WIS2 المُشتَقة من جميع سجلات GDC المُحمَّلة. وسِّع العقد للتنقل وصولًا إلى الموضوعات الفردية. اكتب في مربع الفلتر أعلى الصفحة للبحث عبر جميع تسميات العقد. انقر على عقدة نهائية لفتح الشريط الجانبي للاشتراك.
+
+NOTE: لا يمكن تفعيل سوى موضوع واحد في آنٍ واحد في طريقة عرض الشجرة.
+
+=== إنشاء اشتراك من الواجهة
+
+عند تحديد موضوع (من بحث الكتالوج أو طريقة عرض الشجرة)، يُفتَح الشريط الجانبي للاشتراك على اليمين.
+
+[cols="1,3"]
+|===
+|الحقل |الوصف
+
+|الموضوعات المحددة
+|موضوع/موضوعات MQTT النشط(ة)
+
+|مجلد الحفظ
+|المسار تحت `/data` لحفظ الملفات (الافتراضي `./`)
+
+|مجموعات البيانات
+|تصفية التنزيلات إلى مجموعات بيانات محددة؛ مُقفَل على السجل المحدد في طريقة عرض الكتالوج
+
+|أنواع الوسائط
+|تقييد التنزيلات حسب نوع MIME
+
+|النطاق الجغرافي
+|فلتر مكاني يُطبَّق عند التنزيل
+
+|نطاق التاريخ والوقت
+|فلتر زمني يُطبَّق عند التنزيل
+
+|فلاتر مخصصة
+|حقول فلتر خاصة بمجموعة البيانات من البيانات الوصفية للرابط في سجل GDC (طريقة عرض الكتالوج فقط)
+|===
+
+انقر على *اشتراك* لفتح مربع حوار التأكيد الذي يعرض حمولة JSON الكاملة. راجعها، ثم انقر على *تأكيد* لإنشاء الاشتراك، أو على *إلغاء* للعودة.
+
+=== إدارة الاشتراكات
+
+تسرد طريقة عرض الاشتراكات جميع الاشتراكات النشطة مع مسارات الحفظ الخاصة بها. انقر على *إلغاء الاشتراك* في أي إدخال لإزالته. استخدم *إعادة تحميل الاشتراكات* لتحديث القائمة بعد أي تغييرات أُجريت عبر API.
+
+=== الإعدادات
+
+تُظهر طريقة عرض الإعدادات عدد السجلات المُحمَّلة من كل GDC. انقر على *تحديث بيانات GDC* لإجبار جلب جديد من الكتالوجات الثلاثة، متجاوزًا ذاكرة التخزين المؤقت Redis.
+
+== فهم موضوعات WIS2
+
+يستخدم WIS2 التسلسلات الهرمية لموضوعات MQTT لتنظيم البيانات. تتبع الموضوعات هذا النمط:
+
+[source]
+----
+origin/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+cache/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+----
+
+* `origin` - بيانات أصلية من مزود البيانات
+* `cache` - نسخة مخزنة مؤقتًا من ذاكرة تخزين عالمية (موصى به للموثوقية)
+* `{centre-id}` - رمز الدولة/المنظمة، مسبوقًا برمز الدولة ISO2C
+* `{data-policy}` - سياسة البيانات الموحدة لـ WMO المطبَّقة على البيانات (core أو recommended)
+* `{earth-system-domain}` - نطاق النظام الأرضي أو التخصص من سياسة البيانات الموحدة لـ WMO
+
+=== أمثلة على الموضوعات
+
+[cols="1,2"]
+|===
+|الموضوع |الوصف
+
+|`cache/a/wis2/de-dwd/data/#`
+|جميع البيانات من Deutscher Wetterdienst
+
+|`cache/a/wis2/+/data/core/weather/surface-based-observations/#`
+|الرصدات السطحية الأساسية من جميع عقد WIS2
+
+|===
+
+=== أحرف البدل
+
+[cols="1,3"]
+|===
+|حرف البدل |المعنى
+
+|`+`
+|يطابق مستوى واحدًا تمامًا (مثال: أي رمز دولة)
+
+|`#`
+|يطابق صفرًا أو أكثر من المستويات (يجب أن يكون في نهاية الموضوع)
+|===
+
+== إدارة الاشتراكات عبر REST API
+
+يمكن أيضًا إدارة الاشتراكات برمجيًا باستخدام REST API. العنوان الافتراضي هو `http://localhost:5002`، غير أن المضيف والمنفذ الفعليين قد يختلفان بحسب بيئة النشر.
+
+TIP: استخدم واجهة Swagger على `http://<host>:5002/swagger` للاستكشاف التفاعلي لـ API.
+
+=== إنشاء اشتراك
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "surface-obs"
+  }'
+----
+
+الاستجابة:
+[source,json]
+----
+{
+  "status": "accepted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "target": "surface-obs"
+}
+----
+
+=== معاملات الاشتراك
+
+[cols="1,1,3"]
+|===
+|المعامل |مطلوب |الوصف
+
+|`topic`
+|نعم
+|نمط موضوع MQTT في WIS2 مع أحرف بدل
+
+|`target`
+|لا
+|مجلد فرعي للملفات المُنزَّلة (تحت `/data`)
+
+|`filter`
+|لا
+|إعداد الفلتر (انظر <<التصفية>>)
+|===
+
+=== سرد الاشتراكات
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+الاستجابة:
+[source,json]
+----
+{
+  "cache/a/wis2/+/data/core/weather/surface-based-observations/#": {
+    "a1b2c3d4-...": {
+      "save_path": "surface-obs",
+      "filter": {}
+    }
+  }
+}
+----
+
+=== الحصول على تفاصيل الاشتراك
+
+أولًا، اسرد الاشتراكات للحصول على معرّف الاشتراك (`a1b2c3d4-...`)، ثم اجلبه بالمعرّف:
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions/<id>
+----
+
+الاستجابة:
+[source,json]
+----
+{
+  "id": "a1b2c3d4-...",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "save_path": "surface-obs",
+  "filter": {}
+}
+----
+
+=== حذف اشتراك
+
+[source,bash]
+----
+curl -X DELETE http://localhost:5002/subscriptions/<id>
+----
+
+حيث `<id>` هو UUID الاشتراك من `GET /subscriptions`. إذا كان هذا آخر اشتراك للموضوع، يُغلَق اتصال MQTT أيضًا.
+
+[[التصفية]]
+== التصفية
+
+تقبل الاشتراكات كائن `filter` اختياريًا يتحكم في الإشعارات التي تُنزَّل.
+تستخدم الفلاتر قواعد مُرتَّبة — تُحدِّد أول قاعدة تتطابق النتيجة.
+
+=== هيكل الفلتر
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "my-filter",
+    "rules": [
+      {
+        "id": "rule-1",
+        "order": 1,
+        "match": { ... },
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": { "always": true },
+        "action": "reject"
+      }
+    ]
+  }
+}
+----
+
+تتطلب كل قاعدة:
+
+[cols="1,1,3"]
+|===
+|الحقل |مطلوب |الوصف
+
+|`id`
+|نعم
+|تسمية قصيرة تُعرَض في السجلات عند تفعيل القاعدة
+
+|`order`
+|نعم
+|تُقيَّم القواعد بترتيب تصاعدي — الأرقام الأصغر أولًا
+
+|`match`
+|نعم
+|الشرط الذي يجب أن يكون صحيحًا لتطبيق القاعدة (انظر <<شروط-المطابقة>>)
+
+|`action`
+|نعم
+|`accept` أو `reject` أو `continue` (الاستمرار إلى القاعدة التالية)
+
+|`reason`
+|لا
+|تفسير مقروء يُعرَض في السجلات والمقاييس
+|===
+
+إذا لم تتطابق أي قاعدة، فالنتيجة الافتراضية هي **accept**.
+
+=== السلوك الافتراضي (بدون فلتر)
+
+عند عدم تقديم أي `filter`، يُشغَّل فلتر افتراضي مُدمَج يرفض أي نوع وسائط غير موجود في قائمة مسموح بها قياسية (BUFR وGRIB وNetCDF وHDF5 والصور الشائعة وصيغ النص). لقبول كل شيء، استخدم فلتر قبول صريحًا:
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "accept-all",
+    "rules": [
+      {"id": "accept-all", "order": 1, "match": {"always": true}, "action": "accept"}
+    ]
+  }
+}
+----
+
+[[شروط-المطابقة]]
+=== شروط المطابقة
+
+==== دائمًا / أبدًا
+
+[source,json]
+----
+{"always": true}   <1>
+{"always": false}  <2>
+----
+<1> يتطابق دون شرط — مفيد كقاعدة افتراضية في نهاية القائمة
+<2> لا يتطابق أبدًا
+
+==== الحقول البسيطة
+
+تُطابق البيانات الوصفية المتاحة في إشعار WIS2:
+
+[source,json]
+----
+{"centre_id":   {"equals": "de-dwd"}}
+{"topic":       {"pattern": "cache/a/wis2/+/data/core/weather/#"}}
+{"href":        {"regex": "\\.bufr4?$"}}
+{"data_id":     {"not_equals": "some-id"}}
+----
+
+الحقول المتاحة:
+
+[cols="1,3"]
+|===
+|الحقل |الوصف
+
+|`centre_id`
+|معرّف المركز من الموضع 3 في الموضوع (مثال: `de-dwd`، `ca-eccc-msc`)
+
+|`topic`
+|سلسلة موضوع MQTT الكاملة
+
+|`href`
+|عنوان URL للتنزيل من الإشعار
+
+|`data_id`
+|`properties.data_id` من إشعار WIS2
+
+|`metadata_id`
+|`properties.metadata_id` من إشعار WIS2
+
+|`media_type`
+|نوع MIME المُكتشَف للملف المُنزَّل — **بعد التنزيل فقط** (انظر <<مرحلتان>>)
+|===
+
+المشغِّلات المتاحة: `equals`، `not_equals`، `in`، `not_in`، `pattern` (glob)، `regex`، `exists`
+
+==== الحجم
+
+يُطابق حجم الملف بالبايتات. يستخدم حقل `size` مشغِّلاته الخاصة بوحدات البايت:
+
+[source,json]
+----
+{"size": {"gt_bytes":  104857600}}             <1>
+{"size": {"lte_bytes": 1048576}}               <2>
+{"size": {"between_bytes": [1024, 5242880]}}   <3>
+----
+<1> أكبر من 100 ميجابايت
+<2> 1 ميجابايت أو أقل
+<3> بين 1 كيلوبايت و5 ميجابايتات
+
+المشغِّلات: `gt_bytes`، `gte_bytes`، `lt_bytes`، `lte_bytes`، `between_bytes`، `exists`
+
+NOTE: `size` هو عدد البايتات الفعلي المُنزَّل ولا يُعرَف إلا **بعد** جلب الملف — انظر <<مرحلتان>>.
+
+==== النطاق الجغرافي المحدد
+
+يتطابق إذا كانت هندسة الإشعار تقع داخل المربع. تمر الإشعارات التي لا تحتوي على هندسة.
+
+[source,json]
+----
+{"bbox": {"north": 55.0, "south": 47.0, "east": 15.0, "west": 6.0}}
+----
+
+جميع الإحداثيات الأربعة مطلوبة وبالدرجات العشرية.
+
+==== خصائص الإشعار الديناميكية
+
+تُطابق أي حقل داخل كائن `properties` لإشعار WIS2 باستخدام المفتاح `property`:
+
+[source,json]
+----
+{"property": "model_run",     "type": "string",   "equals": "00"}
+{"property": "forecast_hour", "type": "integer",  "lte": 48}
+{"property": "datetime",      "type": "datetime", "gte": "2024-01-01T00:00:00Z"}
+----
+
+الأنواع المدعومة: `string`، `integer`، `number`، `boolean`، `datetime`
+
+=== دوال الجمع
+
+يمكن تداخل الشروط باستخدام دوال الجمع المنطقية:
+
+[source,json]
+----
+{"all": [condition1, condition2]}   <1>
+{"any": [condition1, condition2]}   <2>
+{"not": condition}                  <3>
+----
+<1> و (AND) — يجب أن تتطابق جميع الشروط الفرعية
+<2> أو (OR) — يجب أن يتطابق أي شرط فرعي
+<3> ليس (NOT) — يجب ألا يتطابق الشرط الفرعي
+
+مثال — قبول تشغيلات 00Z و12Z فقط مع توقعات قصيرة المدى من مركز محدد:
+
+[source,json]
+----
+{
+  "all": [
+    {"centre_id": {"equals": "ca-eccc-msc"}},
+    {"any": [
+      {"property": "model_run", "type": "string", "equals": "00"},
+      {"property": "model_run", "type": "string", "equals": "12"}
+    ]},
+    {"property": "forecast_hour", "type": "integer", "lte": 48}
+  ]
+}
+----
+
+[[مرحلتان]]
+=== التقييم قبل التنزيل وبعده
+
+WARNING: لا تُعرَف `media_type` و`size` إلا *بعد* تنزيل الملف. تُقيَّم الفلاتر *مرتين*: مرة قبل التنزيل (ما قبل التنزيل) ومرة بعده (ما بعد التنزيل). تُتخطى القواعد التي تعتمد على `media_type` أو `size` بصمت في مرحلة ما قبل التنزيل.
+
+هذا يعني أن الفلتر التالي **يرفض كل شيء** — لا تُفعَّل قاعدة `media_type` أبدًا في مرحلة ما قبل التنزيل، وتُفعَّل قاعدة `reject-all` بدلًا منها:
+
+[source,json]
+----
+{
+  "rules": [
+    {"id": "accept-bufr", "order": 1,
+     "match": {"media_type": {"in": ["application/bufr"]}}, "action": "accept"},
+    {"id": "reject-all",  "order": 99,
+     "match": {"always": true}, "action": "reject"}
+  ]
+}
+----
+
+النمط الصحيح هو تأمين قاعدة الرفض بـ `media_type.exists`، بحيث لا تُفعَّل إلا بعد التنزيل عندما يكون النوع معروفًا فعلًا:
+
+[source,json]
+----
+{
+  "rules": [
+    {"id": "accept-bufr", "order": 1,
+     "match": {"media_type": {"in": ["application/bufr", "application/octet-stream"]}},
+     "action": "accept"},
+    {"id": "reject-wrong-type", "order": 2,
+     "match": {"media_type": {"exists": true}},
+     "action": "reject", "reason": "Media type not allowed"}
+  ]
+}
+----
+
+ما قبل التنزيل: لا تُفعَّل أي قاعدة (كلتاهما تتطلب `media_type` معروفة) → يستمر التنزيل. +
+ما بعد التنزيل: تقبل القاعدة 1 BUFR/octet-stream؛ ترفض القاعدة 2 كل شيء آخر.
+
+=== أنواع الوسائط المدعومة
+
+الأنواع المقبولة افتراضيًا عند عدم تحديد فلتر:
+
+[cols="1,2"]
+|===
+|الفئة |الأنواع
+
+|صيغ WMO
+|`application/bufr`، `application/grib`
+
+|علمية
+|`application/x-hdf`، `application/x-hdf5`، `application/x-netcdf`، `application/x-netcdf4`
+
+|صور
+|`image/gif`، `image/jpeg`، `image/png`، `image/tiff`
+
+|مستندات
+|`application/pdf`، `application/postscript`
+
+|نص
+|`text/plain`، `text/html`، `text/xml`، `text/csv`، `text/tab-separated-values`
+
+|ثنائي
+|`application/octet-stream`
+|===
+
+=== أمثلة على الفلاتر
+
+==== قبول BUFR وGRIB فقط
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "wmo-formats-only",
+    "rules": [
+      {
+        "id": "accept-wmo",
+        "order": 1,
+        "match": {"media_type": {"in": ["application/bufr", "application/grib"]}},
+        "action": "accept"
+      },
+      {
+        "id": "reject-other",
+        "order": 2,
+        "match": {"media_type": {"exists": true}},
+        "action": "reject",
+        "reason": "Not a WMO format"
+      }
+    ]
+  }
+}
+----
+
+==== رفض الملفات التي تتجاوز 100 ميجابايت
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "size-limit",
+    "rules": [
+      {
+        "id": "reject-large",
+        "order": 1,
+        "match": {"size": {"gt_bytes": 104857600}},
+        "action": "reject",
+        "reason": "Exceeds 100 MB"
+      }
+    ]
+  }
+}
+----
+
+==== بيانات من مركز محدد، قصير المدى فقط
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "eccc-short-range",
+    "rules": [
+      {
+        "id": "reject-large",
+        "order": 1,
+        "match": {"size": {"gt_bytes": 104857600}},
+        "action": "reject",
+        "reason": "Exceeds 100 MB"
+      },
+      {
+        "id": "accept-short-range",
+        "order": 2,
+        "match": {
+          "all": [
+            {"property": "model_run",     "type": "string",  "in": ["00", "12"]},
+            {"property": "forecast_hour", "type": "integer", "lte": 48}
+          ]
+        },
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": {"always": true},
+        "action": "reject"
+      }
+    ]
+  }
+}
+----
+
+==== فلتر المنطقة الجغرافية
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "europe-only",
+    "rules": [
+      {
+        "id": "accept-europe",
+        "order": 1,
+        "match": {"bbox": {"north": 71.0, "south": 34.0, "east": 40.0, "west": -25.0}},
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": {"always": true},
+        "action": "reject",
+        "reason": "Outside European bounding box"
+      }
+    ]
+  }
+}
+----
+
+== الملفات المُنزَّلة
+
+=== تنظيم الملفات
+
+تُنظَّم الملفات تحت مجلدك المستهدف في مجلدات فرعية بتنسيق `YYYY/MM/DD` استنادًا إلى تاريخ *تنزيل* الملف (وليس وقت الرصد أو وقت صلاحية البيانات):
+
+[source]
+----
+/data/
+└── surface-obs/           # Your target directory
+    └── 2026/
+        └── 03/
+            └── 05/        # Date downloaded (UTC)
+                ├── SYNOP_20260128T120000.bufr
+                ├── SYNOP_20260128T121500.bufr
+                └── ...
+----
+
+NOTE: يعكس تاريخ المجلد وقت وصول الملف، لا وقت إنتاج البيانات أو صلاحيتها. ستظهر الملفات التي تصل متأخرةً من فترات رصد سابقة في المجلد المقابل لتاريخ تنزيلها.
+
+=== تسمية الملفات
+
+تحتفظ الملفات بأسمائها الأصلية من عنوان URL للتنزيل. إذا كان ملف بنفس الاسم موجودًا بالفعل ولم يكن تحديثًا، يُتخطى التنزيل.
+
+=== عرض التنزيلات
+
+[source,bash]
+----
+# سرد أحدث التنزيلات
+ls -la downloads/surface-obs/$(date +%Y/%m/%d)/
+
+# عدّ الملفات حسب النوع
+find downloads/ -name "*.bufr" | wc -l
+
+# الحجم الإجمالي
+du -sh downloads/
+----
+
+NOTE: يُبلِّغ `du` عن استخدام القرص استنادًا إلى تخصيص الكتل في نظام الملفات، لا عدد البايتات الفعلي. تستهلك الملفات الصغيرة الكثيرة (كنشرات BUFR) كتلةً كاملةً لكلٍّ منها بغض النظر عن حجمها الفعلي، لذا قد تكون نتائج `du` أكبر من مجموع أحجام الملفات الفردية الظاهرة في `ls -la`.
+
+== المراقبة
+
+=== فحص الصحة
+
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+الاستجابة:
+[source,json]
+----
+{"status": "healthy"}
+----
+
+=== المقاييس
+
+عرض إحصائيات التنزيل:
+
+[source,bash]
+----
+# إجمالي التنزيلات
+curl -s http://localhost:5002/metrics | grep wis2downloader_downloads_total
+
+# التنزيلات الفاشلة
+curl -s http://localhost:5002/metrics | grep wis2downloader_failed_total
+
+# عمق قائمة الانتظار
+curl -s http://localhost:5002/metrics | grep wis2downloader_celery_queue_length
+----
+
+=== طريقة عرض لوحة التحكم
+
+تعرض لوحة التحكم المدمجة (kbd:[Alt+1]) معدلات التنزيل وعمق قائمة الانتظار ومساحة القرص وإجماليات البايتات في الوقت الفعلي. لا يلزم تسجيل دخول منفصل.
+
+TIP: لوحة التحكم مُدمَجة مباشرةً في واجهة المستخدم — لا داعي لفتح Grafana بشكل منفصل.
+
+== حالات الاستخدام الشائعة
+
+=== الاشتراك في جميع الرصدات السطحية
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "synop"
+  }'
+----
+
+=== الاشتراك في دولة محددة
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/de-dwd/data/#",
+    "target": "dwd"
+  }'
+----
+
+=== تنزيل ملفات BUFR وGRIB فقط
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/#",
+    "target": "wmo-formats",
+    "filter": {
+      "name": "wmo-formats-only",
+      "rules": [
+        {
+          "id": "accept-wmo",
+          "order": 1,
+          "match": {"media_type": {"in": ["application/bufr", "application/grib"]}},
+          "action": "accept"
+        },
+        {
+          "id": "reject-other",
+          "order": 2,
+          "match": {"media_type": {"exists": true}},
+          "action": "reject",
+          "reason": "Not a WMO format"
+        }
+      ]
+    }
+  }'
+----
+
+=== اشتراكات متعددة
+
+إنشاء اشتراكات منفصلة لأنواع بيانات مختلفة:
+
+[source,bash]
+----
+# الرصدات السطحية
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#", "target": "surface"}'
+
+# الرصدات الجوية العلوية
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/upper-air-observations/#", "target": "upper-air"}'
+
+# التنبؤات
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/prediction/#", "target": "forecasts"}'
+----
+
+== استكشاف الأخطاء وإصلاحها
+
+=== لا توجد ملفات مُنزَّلة
+
+1. تحقق من وجود الاشتراك:
++
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+2. تحقق من صحة النظام:
++
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+3. تحقق من التنزيلات المتخطاة (المقاييس):
++
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep skipped
+----
+
+=== الملفات تُتخطى
+
+تحقق من سبب التخطي في المقاييس:
+
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep wis2downloader_skipped_total
+----
+
+الأسباب الشائعة:
+
+* `PreviouslyProcessed` - الملف مُنزَّل بالفعل (إزالة التكرار)
+* `FilterRejected` - مرفوض بواسطة قاعدة فلتر
+* `GlobalCacheBlacklisted` - ذاكرة التخزين المؤقت مُستبعَدة عبر `GC_EXCLUDE`
+
+=== تُنزَّل أنواع ملفات خاطئة
+
+احذف الاشتراك الموجود وأعد إنشاءه بفلتر `media_type`. استخدم `media_type.exists` كحارس للرفض — وليس `always: true` — حتى لا تُفعَّل قاعدة الرفض إلا بعد معرفة نوع الملف (انظر <<مرحلتان>>):
+
+[source,bash]
+----
+# سرد الاشتراكات للعثور على UUID
+curl http://localhost:5002/subscriptions
+
+# حذف الاشتراك القديم باستخدام UUID
+curl -X DELETE http://localhost:5002/subscriptions/<id>
+
+# إنشاء اشتراك جديد مع فلتر
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "your-topic",
+    "target": "your-target",
+    "filter": {
+      "name": "bufr-only",
+      "rules": [
+        {
+          "id": "accept-bufr",
+          "order": 1,
+          "match": {"media_type": {"in": ["application/bufr", "application/octet-stream"]}},
+          "action": "accept"
+        },
+        {
+          "id": "reject-other",
+          "order": 2,
+          "match": {"media_type": {"exists": true}},
+          "action": "reject",
+          "reason": "Media type not allowed"
+        }
+      ]
+    }
+  }'
+----
+
+=== كل شيء يُرفض بواسطة الفلتر
+
+إذا رُفضت جميع الإشعارات بسبب `FilterRejected`، فالسبب الأكثر شيوعًا هو تفعيل قاعدة رفض `always: true` في مرحلة ما قبل التنزيل قبل معرفة `media_type`.
+
+افحص فلترك: إذا كانت لديك قاعدة قبول `media_type` تتبعها قاعدة رفض `always: true`، فلن تُفعَّل قاعدة القبول أبدًا في مرحلة ما قبل التنزيل لأن `media_type` لا تُعرَف إلا بعد التنزيل. استبدل رفض `always: true` بـ `media_type.exists: true` — انظر <<مرحلتان>>.

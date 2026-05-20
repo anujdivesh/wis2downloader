@@ -1,0 +1,33 @@
+= WIS2 Downloader — Documentation
+:icons: font
+
+Select a language to view the documentation:
+
+[cols="1,1,2",options="header"]
+|===
+|Language |Native name |Link
+
+|English
+|English
+|link:en/index.html[View docs]
+
+|French
+|Français
+|link:fr/index.html[View docs]
+
+|Spanish
+|Español
+|link:es/index.html[View docs]
+
+|Arabic
+|العربية
+|link:ar/index.html[View docs]
+
+|Chinese
+|中文
+|link:zh/index.html[View docs]
+
+|Russian
+|Русский
+|link:ru/index.html[View docs]
+|===

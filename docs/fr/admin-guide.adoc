@@ -1,0 +1,762 @@
+= Guide d'administration WIS2 Downloader
+:toc: left
+:toc-title: Sommaire
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+[NOTE]
+====
+Ce document a été traduit automatiquement depuis l'anglais par Claude AI.
+Les termes du domaine WMO/météorologique doivent être vérifiés par un locuteur natif avant
+toute utilisation en production. Consultez le lien:../en/[document original en anglais] pour la version faisant autorité.
+====
+
+== Déploiement
+
+=== Prérequis
+
+* Docker 20.10+
+* Docker Compose 2.0+
+* 4 Go de RAM minimum (8 Go recommandés pour la production)
+* Accès réseau au courtier global WIS2 (port 443)
+
+=== Installation
+
+[source,bash]
+----
+git clone https://github.com/World-Meteorological-Organization/wis2downloader
+cd wis2downloader
+cp default.env .env
+----
+
+Modifiez `.env` pour configurer votre déploiement, puis démarrez :
+
+[source,bash]
+----
+docker-compose up -d
+----
+
+=== Configuration de sécurité
+
+IMPORTANT: Avant de déployer en production, vous devez configurer ces paramètres de sécurité dans votre fichier `.env` :
+
+1. **`REDIS_PASSWORD`** - Définissez un mot de passe fort et unique (obligatoire)
+2. **`FLASK_SECRET_KEY`** - Définissez une clé secrète cryptographiquement aléatoire (obligatoire)
+3. **`FLASK_DEBUG`** - Définissez à `false` en production
+4. **Mot de passe Grafana** - Changez le mot de passe par défaut `admin/admin` après la première connexion
+
+Le fichier `.env` contient des identifiants sensibles. Assurez-vous qu'il est :
+
+* Non versionné (ajoutez-le à `.gitignore`)
+* Lisible uniquement par l'utilisateur de déploiement (`chmod 600 .env`)
+* Sauvegardé de manière sécurisée
+
+==== Contrôle d'accès
+
+WARNING: WIS2 Downloader n'implémente pas d'authentification ni d'autorisation sur l'interface web ou l'API REST du gestionnaire d'abonnements. Toute personne ayant accès au réseau sur l'interface (port 8080) ou l'API (port 5002) peut consulter, créer, modifier et supprimer des abonnements.
+
+Dans un environnement partagé ou accessible depuis Internet, vous *devez* restreindre l'accès au niveau réseau. Approches recommandées :
+
+* **Proxy inverse avec authentification** — Placez nginx ou Caddy devant les ports de l'interface et de l'API, en imposant une authentification HTTP Basic ou OAuth avant de transmettre les requêtes. Une configuration nginx minimale :
++
+[source,nginx]
+----
+location / {
+    auth_basic           "WIS2 Downloader";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    proxy_pass           http://localhost:8080;
+}
+----
+* **Règles de pare-feu** — Restreignez les ports 8080 et 5002 aux plages d'adresses IP de confiance à l'aide de `iptables`, `ufw` ou de groupes de sécurité cloud.
+* **VPN / réseau privé** — Déployez derrière un VPN afin que seuls les utilisateurs VPN authentifiés puissent atteindre les services.
+
+Si le système s'exécute sur un serveur plutôt que sur localhost, assurez-vous que les ports 8080 et 5002 ne sont pas accessibles publiquement avant d'ajouter l'un des contrôles d'accès ci-dessus.
+
+=== Permissions de volumes
+
+Les conteneurs de l'application s'exécutent en tant qu'utilisateur non-root (`wis2`) pour des raisons de sécurité. Pour permettre aux conteneurs d'écrire les fichiers téléchargés sur le système de fichiers hôte, vous devez configurer les permissions appropriées sur le répertoire `downloads/`.
+
+==== Détails de l'utilisateur du conteneur
+
+[cols="1,2"]
+|===
+|Propriété |Valeur
+
+|Nom d'utilisateur
+|`wis2`
+
+|Identifiant utilisateur (UID)
+|`10001`
+
+|Nom du groupe
+|`wis2`
+
+|Identifiant de groupe (GID)
+|`988`
+|===
+
+Le worker Celery écrit les fichiers dans `/data` à l'intérieur du conteneur, ce qui correspond à `./downloads/` sur l'hôte.
+
+==== Option 1 : Créer un utilisateur/groupe correspondant (Recommandé)
+
+Créez un utilisateur et un groupe sur le système hôte correspondant aux UID/GID du conteneur :
+
+[source,bash]
+----
+# Créer le groupe wis2 avec GID 988
+sudo groupadd -g 988 wis2
+
+# Créer l'utilisateur wis2 avec UID 10001
+sudo useradd -u 10001 -g wis2 -M -s /usr/sbin/nologin wis2
+
+# Définir les droits sur le répertoire de téléchargements
+sudo mkdir -p downloads
+sudo chown -R wis2:wis2 downloads
+----
+
+==== Option 2 : Utiliser les ACL (Flexible)
+
+Si vous ne pouvez pas créer un utilisateur/groupe correspondant, utilisez les listes de contrôle d'accès POSIX pour accorder au UID du conteneur un accès en écriture :
+
+[source,bash]
+----
+# Vérifier que le support ACL est installé
+sudo apt-get install acl  # Debian/Ubuntu
+sudo yum install acl      # RHEL/CentOS
+
+# Créer le répertoire de téléchargements
+mkdir -p downloads
+
+# Accorder un accès complet à UID 10001
+sudo setfacl -R -m u:10001:rwx downloads
+sudo setfacl -R -d -m u:10001:rwx downloads  # Default ACL for new files
+----
+
+==== Option 3 : Répertoire permissif
+
+WARNING: Cette approche est moins sécurisée et n'est pas recommandée pour la production.
+
+[source,bash]
+----
+mkdir -p downloads
+chmod 777 downloads
+----
+
+==== Vérification des permissions
+
+Testez que le conteneur peut écrire dans le volume :
+
+[source,bash]
+----
+# Démarrer le conteneur celery
+docker-compose up -d celery
+
+# Tester l'accès en écriture depuis l'intérieur du conteneur
+docker exec celery touch /data/test-write && echo "Write OK" || echo "Write FAILED"
+
+# Nettoyer
+docker exec celery rm -f /data/test-write
+----
+
+Si le test échoue avec "Permission denied", vérifiez la propriété et les permissions du répertoire `downloads/` sur l'hôte.
+
+==== Accès partagé avec les utilisateurs hôtes
+
+Si vous avez besoin que des utilisateurs hôtes puissent lire les fichiers téléchargés, ajoutez-les au groupe `wis2` :
+
+[source,bash]
+----
+# Ajouter votre utilisateur au groupe wis2
+sudo usermod -aG wis2 $USER
+
+# Se déconnecter et se reconnecter pour activer l'appartenance au groupe
+# Puis vérifier
+groups  # Should include 'wis2'
+----
+
+Vous pouvez également utiliser les ACL pour accorder un accès en lecture à des utilisateurs spécifiques :
+
+[source,bash]
+----
+# Accorder un accès en lecture à un utilisateur spécifique
+sudo setfacl -R -m u:youruser:rx downloads
+sudo setfacl -R -d -m u:youruser:rx downloads
+----
+
+=== Vérification du déploiement
+
+NOTE: Les exemples ci-dessous utilisent `localhost`. Si le système est déployé sur un serveur distant, remplacez `localhost` par le nom d'hôte ou l'adresse IP du serveur. Les ports (5002 pour l'API, 8080 pour l'interface) peuvent être modifiés dans `docker-compose.yaml` si nécessaire.
+
+[source,bash]
+----
+# Vérifier que tous les services sont en cours d'exécution
+docker-compose ps
+
+# Vérifier le point de terminaison de santé (gestionnaire d'abonnements)
+curl http://localhost:5002/health
+
+# Vérifier que l'interface web est opérationnelle
+curl -o /dev/null -s -w "%{http_code}" http://localhost:8080
+
+# Afficher les journaux
+docker-compose logs -f subscriber
+----
+
+== Configuration
+
+=== Variables d'environnement
+
+==== Paramètres de l'application
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Valeur par défaut |Description
+
+|`LOG_LEVEL`
+|string
+|`DEBUG`
+|Niveau de journalisation : DEBUG, INFO, WARNING, ERROR
+
+|`DATA_PATH`
+|path
+|`/data`
+|Répertoire de base pour les fichiers téléchargés
+
+|`FLASK_SECRET_KEY`
+|string
+|_obligatoire_
+|Clé secrète de session Flask (l'application échoue si non définie)
+
+|`FLASK_DEBUG`
+|boolean
+|`false`
+|Activer le mode debug Flask (définir à `false` en production)
+
+|`FLASK_HOST`
+|string
+|`0.0.0.0`
+|Adresse d'écoute de l'API
+
+|`FLASK_PORT`
+|integer
+|`5001`
+|Port d'écoute de l'API (interne)
+|===
+
+==== Paramètres du courtier MQTT
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Valeur par défaut |Description
+
+|`GLOBAL_BROKER_HOST`
+|string
+|_obligatoire_
+|Nom d'hôte du courtier global WIS2 (ex. : `globalbroker.meteo.fr`)
+
+|`GLOBAL_BROKER_PORT`
+|integer
+|`443`
+|Port du courtier
+
+|`GLOBAL_BROKER_USERNAME`
+|string
+|`everyone`
+|Nom d'utilisateur MQTT
+
+|`GLOBAL_BROKER_PASSWORD`
+|string
+|`everyone`
+|Mot de passe MQTT
+
+|`MQTT_PROTOCOL`
+|string
+|`websockets`
+|Protocole de transport : `websockets` ou `tcp`
+
+|`MQTT_SESSION_ID`
+|string
+|_généré automatiquement_
+|Identifiant de session persistant pour la reprise après redémarrage
+|===
+
+==== Paramètres Redis
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Valeur par défaut |Description
+
+|`REDIS_HOST`
+|string
+|`redis`
+|Nom d'hôte du serveur Redis
+
+|`REDIS_PORT`
+|integer
+|`6379`
+|Port du serveur Redis
+
+|`REDIS_DATABASE`
+|integer
+|`0`
+|Numéro de la base de données Redis
+
+|`REDIS_PASSWORD`
+|string
+|_obligatoire_
+|Mot de passe d'authentification Redis (l'application échoue si non défini)
+
+|`REDIS_TTL_SECONDS`
+|integer
+|`3600`
+|TTL pour les clés de déduplication
+
+|`REDIS_MESSAGE_LOCK`
+|integer
+|`300`
+|Expiration du verrou pour la prévention des téléchargements simultanés
+|===
+
+==== Paramètres Celery
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Valeur par défaut |Description
+
+|`CELERY_BROKER_URL`
+|string
+|`redis://:${REDIS_PASSWORD}@redis:6379/0`
+|Chaîne de connexion au courtier Celery (noter le format du mot de passe)
+
+|`CELERY_RESULT_BACKEND`
+|string
+|`redis://:${REDIS_PASSWORD}@redis:6379/1`
+|Chaîne de connexion au backend de résultats (noter le format du mot de passe)
+|===
+
+==== Filtrage des téléchargements
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Valeur par défaut |Description
+
+|`GC_EXCLUDE`
+|string
+|_vide_
+|Liste séparée par des virgules des noms d'hôtes de cache global à exclure
+|===
+
+==== Paramètres de l'interface web
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Valeur par défaut |Description
+
+|`WIS2_SUBSCRIPTION_MANAGER_URL`
+|string
+|`http://subscription-manager:5001`
+|URL interne utilisée par l'interface pour atteindre l'API du gestionnaire d'abonnements
+
+|`WIS2_GRAFANA_URL`
+|string
+|`http://localhost:3000`
+|URL utilisée pour intégrer les panneaux Grafana dans la vue Tableau de bord
+
+|`STORAGE_SECRET`
+|string
+|`wis2box-rx-secret`
+|Clé secrète de stockage de session NiceGUI — définissez une valeur unique en production
+
+|`GDC_CACHE_TTL_SECONDS`
+|integer
+|`21600`
+|Secondes de mise en cache des données du catalogue GDC dans Redis (6 heures par défaut) ; définissez à `0` pour toujours récupérer en direct
+|===
+
+=== Structure des fichiers
+
+[source]
+----
+wis2downloader/
+├── config/
+│   ├── grafana/provisioning/    # Grafana datasource config
+│   ├── loki/                    # Loki configuration
+│   └── prometheus/              # Prometheus scrape config
+├── containers/                  # Dockerfiles
+├── downloads/                   # Downloaded data (mounted volume)
+├── modules/                     # Python modules
+│   ├── shared/                  # Shared utilities
+│   ├── subscriber/              # MQTT subscriber
+│   ├── subscription_manager/    # REST API
+│   ├── task_manager/            # Celery tasks
+│   └── ui/                      # NiceGUI web interface
+├── docker-compose.yaml
+├── default.env
+└── README.adoc
+----
+
+== Mise à l'échelle
+
+=== Redis
+
+Le système utilise une seule instance Redis pour :
+
+* La messagerie pub/sub entre les services
+* Le stockage de l'état des abonnements
+* Le suivi de la déduplication
+* La file d'attente des tâches Celery et les résultats
+
+Le système utilise une seule instance Redis et ne fournit pas de haute disponibilité. Quelle que soit l'échelle, assurez-vous que les données Redis sont durables :
+
+* Activez la persistance Redis (AOF + RDB)
+* Mettez en place des sauvegardes régulières du dump Redis
+
+=== Mise à l'échelle des workers
+
+Augmentez la concurrence du worker Celery pour un débit plus élevé :
+
+[source,yaml]
+----
+# docker-compose.yaml
+celery:
+  command: ["... --concurrency=16 ..."]
+----
+
+Ou exécutez plusieurs conteneurs workers :
+
+[source,bash]
+----
+docker-compose up -d --scale celery=3
+----
+
+=== Ajout de courtiers globaux
+
+Chaque service abonné se connecte à un seul courtier global WIS2. Pour recevoir des données de plusieurs courtiers, ajoutez des services abonnés supplémentaires dans `docker-compose.yaml` :
+
+[source,yaml]
+----
+  subscriber-france:
+    container_name: subscriber-france
+    restart: always
+    build:
+      context: .
+      dockerfile: ./containers/subscriber/Dockerfile
+    env_file: *default-env
+    environment:
+      GLOBAL_BROKER_HOST: globalbroker.meteo.fr
+      GLOBAL_BROKER_PORT: 443
+      GLOBAL_BROKER_USERNAME: everyone
+      GLOBAL_BROKER_PASSWORD: everyone
+      MQTT_PROTOCOL: websockets
+    depends_on:
+      - redis
+    networks:
+      - redis-net
+    logging: *default-logging
+
+  subscriber-china:
+    container_name: subscriber-china
+    restart: always
+    build:
+      context: .
+      dockerfile: ./containers/subscriber/Dockerfile
+    env_file: *default-env
+    environment:
+      GLOBAL_BROKER_HOST: gb.wis.cma.cn
+      GLOBAL_BROKER_PORT: 443
+      GLOBAL_BROKER_USERNAME: everyone
+      GLOBAL_BROKER_PASSWORD: everyone
+      MQTT_PROTOCOL: websockets
+    depends_on:
+      - redis
+    networks:
+      - redis-net
+    logging: *default-logging
+----
+
+IMPORTANT: Chaque abonné doit avoir un `container_name` unique.
+
+Tous les abonnés partagent le même backend Redis, de sorte que les abonnements créés via l'API sont reçus par toutes les instances d'abonnés. Les téléchargements sont dédupliqués, donc le même fichier ne sera pas téléchargé deux fois même si des notifications arrivent de plusieurs courtiers.
+
+== Surveillance
+
+=== Métriques Prometheus
+
+Point de terminaison des métriques : `http://localhost:5002/metrics`
+
+NOTE: Les métriques sont stockées de manière atomique dans Redis via `HINCRBYFLOAT` et exposées au point de terminaison `/metrics` au format texte Prometheus. Cette approche est sûre pour plusieurs conteneurs de workers Celery sans nécessiter de système de fichiers partagé ni le répertoire multiprocessus de `prometheus_client`.
+
+==== Métriques disponibles
+
+[cols="2,1,3"]
+|===
+|Métrique |Type |Description
+
+|`wis2downloader_notifications_received_total`
+|Counter
+|Messages MQTT reçus avant la mise en file d'attente (étiquettes : broker) ; à comparer avec `notifications_total` pour détecter les échecs de file d'attente
+
+|`wis2downloader_notifications_total`
+|Counter
+|Total des notifications traitées par Celery (étiquettes : status)
+
+|`wis2downloader_downloads_total`
+|Counter
+|Fichiers téléchargés avec succès (étiquettes : cache, media_type)
+
+|`wis2downloader_downloads_bytes_total`
+|Counter
+|Total des octets téléchargés (étiquettes : cache, media_type)
+
+|`wis2downloader_skipped_total`
+|Counter
+|Notifications ignorées par raison (étiquettes : reason)
+
+|`wis2downloader_failed_total`
+|Counter
+|Téléchargements échoués (étiquettes : cache, reason)
+
+|`wis2downloader_queue_errors_total`
+|Counter
+|Échecs de mise en file d'attente d'une tâche Celery depuis l'abonné (étiquettes : broker)
+
+|`wis2downloader_celery_queue_length`
+|Gauge
+|Nombre actuel de tâches dans la file d'attente Celery
+
+|`wis2downloader_disk_total_bytes`
+|Gauge
+|Capacité totale du disque du volume de téléchargement
+
+|`wis2downloader_disk_used_bytes`
+|Gauge
+|Espace disque utilisé sur le volume de téléchargement
+
+|`wis2downloader_disk_free_bytes`
+|Gauge
+|Espace disque disponible sur le volume de téléchargement
+
+|`wis2downloader_disk_downloads_bytes`
+|Gauge
+|Octets utilisés par les fichiers téléchargés (suivi incrémentiel)
+|===
+
+==== Exemples de requêtes
+
+[source,promql]
+----
+# Taux de téléchargement par minute
+sum(rate(wis2downloader_downloads_total[1m]))
+
+# Téléchargements par cache
+sum by (cache) (rate(wis2downloader_downloads_total[5m]))
+
+# Téléchargements échoués par raison
+sum by (reason) (wis2downloader_failed_total)
+
+# Octets téléchargés dans la dernière heure
+sum(increase(wis2downloader_downloads_bytes_total[1h]))
+
+# Profondeur de la file d'attente
+wis2downloader_celery_queue_length
+----
+
+=== Grafana
+
+Accédez à Grafana sur `http://localhost:3000` (identifiants par défaut : admin/admin)
+
+IMPORTANT: Changez le mot de passe Grafana par défaut après la première connexion ou configurez-le via la variable d'environnement `GF_SECURITY_ADMIN_PASSWORD` pour les déploiements en production.
+
+Sources de données préconfigurées :
+
+* Prometheus - `http://prometheus:9090`
+* Loki - `http://loki:3100`
+
+=== Journalisation
+
+Tous les services journalisent vers stdout avec des horodatages UTC :
+
+[source]
+----
+2026-01-28T10:15:30.123Z subscriber INFO Connected successfully
+----
+
+Consultez les journaux via Docker :
+
+[source,bash]
+----
+# Tous les services
+docker-compose logs -f
+
+# Service spécifique
+docker-compose logs -f celery
+
+# Avec les horodatages
+docker-compose logs -f -t subscriber
+----
+
+Les journaux sont également collectés par Loki et interrogeables dans Grafana.
+
+== Maintenance
+
+=== Sauvegarde
+
+==== Données Redis
+
+[source,bash]
+----
+# Déclencher un instantané RDB
+docker exec redis redis-cli -a $REDIS_PASSWORD BGSAVE
+
+# Copier l'instantané
+docker cp redis:/data/dump.rdb ./backup/
+----
+
+==== Fichiers téléchargés
+
+[source,bash]
+----
+# Sauvegarder le répertoire de téléchargements
+tar -czf wis2-downloads-$(date +%Y%m%d).tar.gz downloads/
+----
+
+=== Suppression des données
+
+WARNING: Ces opérations sont destructives.
+
+[source,bash]
+----
+# Effacer tous les abonnements
+docker exec redis redis-cli -a $REDIS_PASSWORD DEL global:all_subscriptions
+
+# Effacer le cache de déduplication (permet de re-télécharger toutes les données)
+docker exec redis redis-cli -a $REDIS_PASSWORD KEYS "wis2:notifications:*" | xargs -r docker exec -i redis redis-cli -a $REDIS_PASSWORD DEL
+
+# Effacer les fichiers téléchargés
+rm -rf downloads/*
+----
+
+=== Redémarrage des services
+
+[source,bash]
+----
+# Redémarrer un service unique
+docker-compose restart subscriber
+
+# Redémarrer tous les services
+docker-compose restart
+
+# Reconstruction complète (après des modifications du code)
+docker-compose build && docker-compose up -d
+----
+
+== Dépannage
+
+=== Le service ne démarre pas
+
+[source,bash]
+----
+# Vérifier les journaux
+docker-compose logs <service-name>
+
+# Vérifier le statut du conteneur
+docker-compose ps
+
+# Vérifier l'environnement
+docker-compose config
+----
+
+=== Aucun téléchargement
+
+1. Vérifiez que l'abonné est connecté :
++
+[source,bash]
+----
+docker-compose logs subscriber | grep -i connect
+----
+
+2. Vérifiez que l'abonnement existe :
++
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+3. Vérifiez que le worker Celery traite :
++
+[source,bash]
+----
+docker-compose logs celery | tail -50
+----
+
+4. Vérifiez la profondeur de la file d'attente :
++
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep queue_length
+----
+
+=== Erreurs de connexion Redis
+
+1. Vérifiez que Redis est en cours d'exécution :
++
+[source,bash]
+----
+docker exec redis redis-cli -a $REDIS_PASSWORD PING
+----
+
+2. Vérifiez la connectivité réseau :
++
+[source,bash]
+----
+docker network inspect wis2downloader_redis-net
+----
+
+=== Utilisation élevée de la mémoire
+
+* Augmentez `max-tasks-per-child` pour recycler les workers plus fréquemment
+* Réduisez la concurrence des workers
+* Vérifiez si des fichiers volumineux surchargent les workers
+
+=== Les métriques ne se mettent pas à jour
+
+* L'intervalle de scraping Prometheus est de 15 secondes par défaut
+* Vérifiez les cibles Prometheus : `http://localhost:9090/targets`
+* Vérifiez le point de terminaison des métriques : `curl http://localhost:5002/metrics`
+
+=== Interface web : données du catalogue non chargées
+
+Si les vues Catalogue ou Arborescence affichent « Catalogue data not loaded » :
+
+1. Vérifiez si le conteneur de l'interface a démarré avec succès :
++
+[source,bash]
+----
+docker-compose logs wis2downloader-ui | tail -30
+----
+
+2. Confirmez que les clés de cache GDC existent dans Redis :
++
+[source,bash]
+----
+docker exec redis redis-cli -a $REDIS_PASSWORD KEYS "gdc:cache:*"
+----
++
+Si aucune clé n'est présente, la récupération initiale a échoué ou est toujours en cours. Attendez un moment et rechargez la page.
+
+3. Forcez une récupération fraîche depuis la vue Paramètres (`http://localhost:8080`) en cliquant sur *Actualiser les données GDC*, ou en redémarrant le conteneur de l'interface :
++
+[source,bash]
+----
+docker-compose restart wis2downloader-ui
+----
+
+4. Si la récupération GDC échoue systématiquement, vérifiez la connectivité réseau depuis le conteneur de l'interface vers les points de terminaison GDC publics :
++
+[source,bash]
+----
+docker exec wis2downloader-ui curl -s -o /dev/null -w "%{http_code}" \
+  https://wis2-gdc.weather.gc.ca/collections/wis2-discovery-metadata/items?limit=1
+----

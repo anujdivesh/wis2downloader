@@ -1,0 +1,14 @@
+= Documentación de WIS2 Downloader
+:toc: left
+:toc-title: Contenido
+:toclevels: 2
+:icons: font
+
+Bienvenido a la documentación de WIS2 Downloader.
+
+== Guías
+
+* link:user-guide.html[Guía de usuario] — Primeros pasos, interfaz web, creación de suscripciones
+* link:admin-guide.html[Guía de administración] — Despliegue, configuración, monitorización
+* link:developer-guide.html[Guía del desarrollador] — Arquitectura, contribuciones, extensión
+* link:api-reference.html[Referencia de la API] — Endpoints de la REST API y formatos de datos

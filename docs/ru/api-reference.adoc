@@ -1,0 +1,548 @@
+= Справочник API WIS2 Downloader
+:toc: left
+:toc-title: Содержание
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+[NOTE]
+====
+Этот документ был автоматически переведён с английского языка с помощью Claude AI.
+Термины из области WMO/метеорологии должны быть проверены носителем языка перед
+использованием в производственной среде. Смотрите link:../en/[оригинал на английском] для авторитетной версии.
+====
+
+== Обзор
+
+WIS2 Downloader предоставляет REST API для управления подписками и мониторинга системы.
+
+* **Базовый URL:** `http://localhost:5002`
+* **Спецификация OpenAPI:** `http://localhost:5002/openapi`
+* **Swagger UI:** `http://localhost:5002/swagger`
+
+== Аутентификация
+
+В настоящее время API не требует аутентификации. В производственной среде рекомендуется разместить его за обратным прокси-сервером с аутентификацией.
+
+== API подписок
+
+=== Список подписок
+
+Возвращает все активные подписки.
+
+[source,http]
+----
+GET /subscriptions
+----
+
+==== Ответ
+
+[cols="1,3"]
+|===
+|Статус |Описание
+
+|200
+|Успех — возвращает карту тема → детали подписки
+
+|503
+|Redis недоступен
+|===
+
+==== Пример
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+[source,json]
+----
+{
+  "cache/a/wis2/+/data/core/weather/surface-based-observations/#": {
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "save_path": "surface-obs",
+    "filters": {
+      "accepted_media_types": ["application/bufr", "application/grib"]
+    }
+  }
+}
+----
+
+=== Создание подписки
+
+Создаёт новую подписку на тему WIS2.
+
+[source,http]
+----
+POST /subscriptions
+Content-Type: application/json
+----
+
+==== Тело запроса
+
+[cols="1,1,1,3"]
+|===
+|Поле |Тип |Обязательно |Описание
+
+|`topic`
+|string
+|Да
+|Шаблон темы MQTT WIS2. Поддерживает `+` (один уровень) и `#` (несколько уровней) как подстановочные знаки.
+
+|`target`
+|string
+|Нет
+|Подкаталог под `/data` для сохранения файлов.
+
+|`filters`
+|object
+|Нет
+|Конфигурация фильтра.
+
+|`filters.accepted_media_types`
+|array
+|Нет
+|Список разрешённых типов MIME. Поддерживает подстановочные знаки (например, `application/x-grib*`).
+|===
+
+==== Ответ
+
+[cols="1,3"]
+|===
+|Статус |Описание
+
+|202
+|Принято — подписка поставлена в очередь на обработку
+
+|400
+|Неверный запрос — тема отсутствует или недействительна
+
+|503
+|Сервис недоступен — ошибка подключения к Redis
+|===
+
+==== Заголовки ответа
+
+[cols="1,3"]
+|===
+|Заголовок |Описание
+
+|`Location`
+|URL для получения деталей подписки
+|===
+
+==== Пример
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "surface-obs",
+    "filters": {
+      "accepted_media_types": ["application/bufr", "application/grib"]
+    }
+  }'
+----
+
+[source,json]
+----
+{
+  "status": "accepted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "target": "surface-obs"
+}
+----
+
+=== Получение подписки
+
+Возвращает детали конкретной подписки.
+
+[source,http]
+----
+GET /subscriptions/{topic}
+----
+
+==== Параметры пути
+
+[cols="1,1,3"]
+|===
+|Параметр |Тип |Описание
+
+|`topic`
+|string
+|Тема WIS2 (только `#` требует кодирования как `%23`)
+|===
+
+==== Кодирование URL
+
+Только символ `#` требует URL-кодирования:
+
+[cols="1,1,2"]
+|===
+|Символ |Закодированный |Причина
+
+|`#`
+|`%23`
+|Иначе интерпретируется как фрагмент URL
+|===
+
+NOTE: Слэши (`/`) и `+` не требуют кодирования в пути.
+
+==== Ответ
+
+[cols="1,3"]
+|===
+|Статус |Описание
+
+|200
+|Успех
+
+|400
+|Недействительная тема
+
+|404
+|Подписка не найдена
+
+|503
+|Redis недоступен
+|===
+
+==== Пример
+
+[source,bash]
+----
+curl "http://localhost:5002/subscriptions/cache/a/wis2/+/data/core/weather/surface-based-observations/%23"
+----
+
+[source,json]
+----
+{
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "save_path": "surface-obs",
+  "filters": {
+    "accepted_media_types": ["application/bufr", "application/grib"]
+  }
+}
+----
+
+=== Удаление подписки
+
+Удаляет подписку.
+
+[source,http]
+----
+DELETE /subscriptions/{topic}
+----
+
+==== Параметры пути
+
+[cols="1,1,3"]
+|===
+|Параметр |Тип |Описание
+
+|`topic`
+|string
+|URL-кодированная тема WIS2
+|===
+
+==== Ответ
+
+[cols="1,3"]
+|===
+|Статус |Описание
+
+|200
+|Успешно удалено
+
+|400
+|Недействительная тема
+
+|503
+|Redis недоступен
+|===
+
+==== Пример
+
+[source,bash]
+----
+curl -X DELETE "http://localhost:5002/subscriptions/cache/a/wis2/+/data/core/weather/surface-based-observations/%23"
+----
+
+[source,json]
+----
+{
+  "status": "deleted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#"
+}
+----
+
+== API мониторинга
+
+=== Проверка работоспособности
+
+Возвращает состояние работоспособности сервиса.
+
+[source,http]
+----
+GET /health
+----
+
+==== Ответ
+
+Всегда возвращает 200. Проверьте поле `status` для фактического состояния.
+
+[cols="1,3"]
+|===
+|Поле |Значения
+
+|`status`
+|`healthy` или `unhealthy`
+|===
+
+==== Пример
+
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+[source,json]
+----
+{"status": "healthy"}
+----
+
+=== Метрики Prometheus
+
+Возвращает метрики в текстовом формате Prometheus.
+
+[source,http]
+----
+GET /metrics
+----
+
+==== Ответ
+
+[cols="1,3"]
+|===
+|Статус |Описание
+
+|200
+|Метрики в текстовом формате Prometheus
+
+|500
+|Ошибка генерации метрик
+|===
+
+==== Доступные метрики
+
+[cols="2,1,2,3"]
+|===
+|Метрика |Тип |Метки |Описание
+
+|`wis2downloader_notifications_total`
+|Counter
+|status
+|Всего обработанных уведомлений
+
+|`wis2downloader_downloads_total`
+|Counter
+|cache, media_type
+|Успешно загруженные файлы
+
+|`wis2downloader_downloads_bytes_total`
+|Counter
+|cache, media_type
+|Всего загруженных байт
+
+|`wis2downloader_skipped_total`
+|Counter
+|reason
+|Пропущенные уведомления по причине
+
+|`wis2downloader_failed_total`
+|Counter
+|cache, reason
+|Неудачные загрузки
+
+|`wis2downloader_celery_queue_length`
+|Gauge
+|queue_name
+|Текущее количество задач в очереди Celery
+|===
+
+==== Пример
+
+[source,bash]
+----
+curl http://localhost:5002/metrics
+----
+
+[source,prometheus]
+----
+# HELP wis2downloader_downloads_total Total number of files downloaded.
+# TYPE wis2downloader_downloads_total counter
+wis2downloader_downloads_total{cache="example.cache.com",media_type="application/bufr"} 42.0
+
+# HELP wis2downloader_notifications_total Total notifications processed.
+# TYPE wis2downloader_notifications_total counter
+wis2downloader_notifications_total{status="success"} 42.0
+wis2downloader_notifications_total{status="skipped"} 5.0
+----
+
+=== Спецификация OpenAPI
+
+Возвращает спецификацию OpenAPI 3.0 в формате JSON.
+
+[source,http]
+----
+GET /openapi
+----
+
+=== Swagger UI
+
+Интерактивная документация API.
+
+[source,http]
+----
+GET /
+GET /swagger
+----
+
+== Ответы с ошибками
+
+Все ответы с ошибками следуют этому формату:
+
+[source,json]
+----
+{
+  "error": "Error message describing the problem"
+}
+----
+
+=== Распространённые сообщения об ошибках
+
+[cols="1,1,2"]
+|===
+|Статус |Ошибка |Причина
+
+|400
+|"No topic provided"
+|POST /subscriptions без поля topic
+
+|400
+|"No topic passed"
+|GET/DELETE с пустой темой
+
+|404
+|"Subscription for topic X not found"
+|Тема не подписана
+
+|503
+|"Failed to connect to Redis: ..."
+|Redis недоступен
+
+|503
+|"Failed to queue subscription command..."
+|Ошибка Redis pub/sub
+
+|503
+|"Failed to persist subscription..."
+|Ошибка записи Redis
+|===
+
+== Схемы данных
+
+=== Подписка
+
+[source,json]
+----
+{
+  "topic": "string (required) - WIS2 MQTT topic pattern",
+  "save_path": "string | null - Subdirectory for downloads",
+  "filters": {
+    "accepted_media_types": ["array of MIME type strings"]
+  }
+}
+----
+
+=== Фильтры
+
+[source,json]
+----
+{
+  "accepted_media_types": [
+    "application/bufr",
+    "application/grib",
+    "application/x-netcdf*"
+  ]
+}
+----
+
+==== Принимаемые типы медиа по умолчанию
+
+Если фильтр не указан, принимаются следующие типы:
+
+[source,json]
+----
+[
+  "image/gif", "image/jpeg", "image/png", "image/tiff",
+  "application/pdf", "application/postscript",
+  "application/bufr", "application/grib",
+  "application/x-hdf", "application/x-hdf5",
+  "application/x-netcdf", "application/x-netcdf4",
+  "text/plain", "text/html", "text/xml", "text/csv",
+  "text/tab-separated-values"
+]
+----
+
+== Справочник по шаблонам тем
+
+=== Структура темы WIS2
+
+[source]
+----
+{origin|cache}/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+----
+
+* `origin` - Исходные данные от поставщика данных
+* `cache` - Кэшированная копия из глобального кэша (рекомендуется для надёжности)
+* `{centre-id}` - Код страны/организации, с префиксом ISO2C кода страны (например, `de-dwd`)
+* `{data-policy}` - Единая политика данных WMO: `core` или `recommended`
+* `{earth-system-domain}` - Область системы Земли из Единой политики данных WMO
+
+=== Подстановочные знаки
+
+[cols="1,1,3"]
+|===
+|Шаблон |Символ |Описание
+
+|Один уровень
+|`+`
+|Соответствует ровно одному уровню
+
+|Несколько уровней
+|`#`
+|Соответствует нулю или более уровней (должен быть в конце)
+|===
+
+=== Примеры
+
+[cols="2,3"]
+|===
+|Шаблон |Соответствует
+
+|`cache/a/wis2/de-dwd/data/#`
+|Все данные от Deutscher Wetterdienst
+
+|`cache/a/wis2/+/data/core/weather/surface-based-observations/#`
+|Приземные наблюдения со всех центров
+
+|`cache/a/wis2/+/data/core/#`
+|Все основные данные из любого центра
+
+|`cache/a/wis2/+/data/+/weather/#`
+|Все метеорологические данные (любая политика) из любого центра
+|===

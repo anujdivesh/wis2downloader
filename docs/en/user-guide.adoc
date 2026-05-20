@@ -1,0 +1,922 @@
+= WIS2 Downloader User Guide
+:toc: left
+:toc-title: Contents
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+== Introduction
+
+WIS2 Downloader automatically downloads data from WIS2 (WMO Information System 2.0) Global Caches based on your
+subscriptions. You create subscriptions to specify which data topics you're interested in, and the system handles
+downloading and organizing the files.
+
+Subscriptions can be created through the browser-based web interface (recommended) or directly via the REST API.
+
+== Web Interface
+
+The web interface is available at `http://<host>:8080` (default `http://localhost:8080` when running locally). The actual host and port depend on how the system is deployed — check with your administrator if accessing a shared instance.
+
+It provides a visual way to discover available WIS2 datasets, browse the topic hierarchy, and create subscriptions without using the REST API directly.
+
+=== Interface Language
+
+The language selector in the top-right corner of the header switches the interface language.  The selected language is remembered for your browser session.
+
+Supported languages:
+
+[cols="1,1"]
+|===
+|Language |Script direction
+
+|English
+|Left-to-right
+
+|Français (French)
+|Left-to-right
+
+|Español (Spanish)
+|Left-to-right
+
+|العربية (Arabic)
+|Right-to-left
+
+|中文 (Chinese)
+|Left-to-right
+
+|Русский (Russian)
+|Left-to-right
+|===
+
+NOTE: The interface translations are machine-generated.  If you notice an inaccurate translation, particularly for WMO/meteorological terms, please report it via the project issue tracker.
+
+=== Navigation
+
+The navigation drawer on the left (right in Arabic RTL mode) gives access to six views. Each can also be reached with a keyboard shortcut:
+
+[cols="1,1,3"]
+|===
+|Shortcut |View |Description
+
+|kbd:[Alt+1]
+|*Dashboard*
+|Embedded Grafana panels showing download rates, queue depth, and byte totals in real time
+
+|kbd:[Alt+2]
+|*Catalogue View*
+|Full-text search across all three Global Discovery Catalogues (GDC) with filtering by data policy, keywords, and bounding box
+
+|kbd:[Alt+3]
+|*Tree View*
+|Browse the complete WIS2 topic hierarchy as a navigable tree and select a topic to open the subscription sidebar
+
+|kbd:[Alt+4]
+|*Manual Subscribe*
+|Enter a topic, save directory, and filter directly without browsing the catalogue
+
+|kbd:[Alt+5]
+|*Manage Subscriptions*
+|List all active subscriptions and unsubscribe from topics
+
+|kbd:[Alt+6]
+|*Settings*
+|View GDC record counts per catalogue and trigger a manual data refresh
+|===
+
+=== Catalogue View
+
+The Catalogue View queries records fetched from the three WIS2 Global Discovery Catalogues (CMA, DWD, ECCC), merged into a single deduplicated list.
+
+==== Search Filters
+
+[cols="1,3"]
+|===
+|Filter |Description
+
+|Search text
+|Matches against dataset ID, title, description, version, keywords, and theme concepts
+
+|Data Policy
+|`all` (default), `core`, or `recommended` — based on the WMO Unified Data Policy
+
+|Keywords
+|Comma-separated list; all keywords must appear in the record
+
+|Bounding box
+|North/West/East/South decimal degrees; returns records whose geometry intersects the box
+|===
+
+Click *Filter* to run the search. Results are paginated at ten per page.
+
+==== Result Cards
+
+Each result card shows:
+
+* Dataset title and record ID
+* Data policy badge (`core` = green, `recommended` = red)
+* Source catalogue chips (CMA = blue, DWD = teal, ECCC = orange)
+* A warning icon if the record content differs between catalogues
+* *Show Metadata* — opens a dialog with full record details and an interactive map of the dataset's geographic extent
+* *Select* / *Unselect* — adds or removes the dataset's MQTT topic to the subscription sidebar
+
+=== Tree View
+
+The Tree View renders the complete WIS2 topic hierarchy derived from all loaded GDC records. Expand nodes to navigate down to individual topics. Type in the filter box at the top to search across all node labels. Click a leaf node to open the subscription sidebar.
+
+NOTE: Only one topic can be active at a time in the tree view.
+
+=== Creating a Subscription from the UI
+
+When a topic is selected (from catalogue search or the tree view), the subscription sidebar opens on the right.
+
+[cols="1,3"]
+|===
+|Field |Description
+
+|Selected Topics
+|The active MQTT topic(s)
+
+|Save directory
+|Path under `/data` where files will be saved (default `./`)
+
+|Datasets
+|Filter downloads to specific datasets; locked to the selected record in catalogue view
+
+|Media types
+|Restrict downloads by MIME type
+
+|Bounding box
+|Spatial filter applied at download time
+
+|Date & time range
+|Temporal filter applied at download time
+
+|Custom filters
+|Dataset-specific filter fields from the GDC record's link metadata (catalogue view only)
+|===
+
+Click *Subscribe* to open a confirmation dialog showing the full JSON payload. Review it, then click *Confirm* to create the subscription, or *Cancel* to go back.
+
+=== Managing Subscriptions
+
+The Subscriptions view lists all active subscriptions with their save paths. Click *Unsubscribe* on any entry to remove it. Use *Reload Subscriptions* to refresh the list after any changes made via the API.
+
+=== Settings
+
+The Settings view shows how many records were loaded from each GDC. Click *Refresh GDC data* to force a fresh fetch from all three catalogues, bypassing the Redis cache.
+
+== Understanding WIS2 Topics
+
+WIS2 uses MQTT topic hierarchies to organize data. Topics follow this pattern:
+
+[source]
+----
+origin/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+cache/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+----
+
+* `origin` - Original data from the data provider
+* `cache` - Cached copy from a Global Cache (recommended for reliability)
+* `{centre-id}` - Country/organization code, prepended with ISO2C country code
+* `{data-policy}` - WMO Unified Data Policy applicable to data (core or recommended)
+* `{earth-system-domain}` - Earth system domain or discipline from the WMO Unified Data Policy
+
+=== Topic Examples
+
+[cols="1,2"]
+|===
+|Topic |Description
+
+|`cache/a/wis2/de-dwd/data/#`
+|All data from Deutscher Wetterdienst
+
+|`cache/a/wis2/+/data/core/weather/surface-based-observations/#`
+|Core surface observations from all WIS2 nodes
+
+|===
+
+=== Wildcards
+
+[cols="1,3"]
+|===
+|Wildcard |Meaning
+
+|`+`
+|Matches exactly one level (e.g., any country code)
+
+|`#`
+|Matches zero or more levels (must be at end of topic)
+|===
+
+== Managing Subscriptions via the REST API
+
+Subscriptions can also be managed programmatically using the REST API. The default address is `http://localhost:5002`, but the actual host and port may differ depending on your deployment.
+
+TIP: Use the Swagger UI at `http://<host>:5002/swagger` for interactive API exploration.
+
+=== Creating a Subscription
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "surface-obs"
+  }'
+----
+
+Response:
+[source,json]
+----
+{
+  "status": "accepted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "target": "surface-obs"
+}
+----
+
+=== Subscription Parameters
+
+[cols="1,1,3"]
+|===
+|Parameter |Required |Description
+
+|`topic`
+|Yes
+|WIS2 MQTT topic pattern with wildcards
+
+|`target`
+|No
+|Subdirectory for downloaded files (under `/data`)
+
+|`filter`
+|No
+|Filter configuration (see <<Filtering>>)
+|===
+
+=== Listing Subscriptions
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+Response:
+[source,json]
+----
+{
+  "cache/a/wis2/+/data/core/weather/surface-based-observations/#": {
+    "a1b2c3d4-...": {
+      "save_path": "surface-obs",
+      "filter": {}
+    }
+  }
+}
+----
+
+=== Getting Subscription Details
+
+First list subscriptions to find the subscription ID (`a1b2c3d4-...`), then fetch by ID:
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions/<id>
+----
+
+Response:
+[source,json]
+----
+{
+  "id": "a1b2c3d4-...",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "save_path": "surface-obs",
+  "filter": {}
+}
+----
+
+=== Deleting a Subscription
+
+[source,bash]
+----
+curl -X DELETE http://localhost:5002/subscriptions/<id>
+----
+
+Where `<id>` is the subscription UUID from `GET /subscriptions`. If this is the last subscription for the topic, the MQTT connection is also closed.
+
+[[Filtering]]
+== Filtering
+
+Subscriptions accept an optional `filter` object that controls which notifications are downloaded.
+Filters use ordered rules — the first rule that matches determines the outcome.
+
+=== Filter Structure
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "my-filter",
+    "rules": [
+      {
+        "id": "rule-1",
+        "order": 1,
+        "match": { ... },
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": { "always": true },
+        "action": "reject"
+      }
+    ]
+  }
+}
+----
+
+Each rule requires:
+
+[cols="1,1,3"]
+|===
+|Field |Required |Description
+
+|`id`
+|Yes
+|Short label shown in logs when the rule fires
+
+|`order`
+|Yes
+|Rules are evaluated in ascending order — lower numbers first
+
+|`match`
+|Yes
+|Condition that must be true for the rule to apply (see <<match-conditions>>)
+
+|`action`
+|Yes
+|`accept`, `reject`, or `continue` (continue to next rule)
+
+|`reason`
+|No
+|Human-readable explanation shown in logs and metrics
+|===
+
+If no rule matches, the default outcome is **accept**.
+
+=== Default Behaviour (No Filter)
+
+When no `filter` is provided, a built-in default filter runs that rejects any media type not in a standard allowed list (BUFR, GRIB, NetCDF, HDF5, common images and text formats). To accept everything, use an explicit accept-all filter:
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "accept-all",
+    "rules": [
+      {"id": "accept-all", "order": 1, "match": {"always": true}, "action": "accept"}
+    ]
+  }
+}
+----
+
+[[match-conditions]]
+=== Match Conditions
+
+==== Always / Never
+
+[source,json]
+----
+{"always": true}   <1>
+{"always": false}  <2>
+----
+<1> Matches unconditionally — useful as a default rule at the end of a list
+<2> Never matches
+
+==== Simple Fields
+
+Match against metadata available in the WIS2 notification:
+
+[source,json]
+----
+{"centre_id":   {"equals": "de-dwd"}}
+{"topic":       {"pattern": "cache/a/wis2/+/data/core/weather/#"}}
+{"href":        {"regex": "\\.bufr4?$"}}
+{"data_id":     {"not_equals": "some-id"}}
+----
+
+Available fields:
+
+[cols="1,3"]
+|===
+|Field |Description
+
+|`centre_id`
+|Centre identifier from position 3 of the topic (e.g. `de-dwd`, `ca-eccc-msc`)
+
+|`topic`
+|Full MQTT topic string
+
+|`href`
+|Download URL from the notification
+
+|`data_id`
+|`properties.data_id` from the WIS2 notification
+
+|`metadata_id`
+|`properties.metadata_id` from the WIS2 notification
+
+|`media_type`
+|Detected MIME type of the downloaded file — **post-download only** (see <<two-pass>>)
+|===
+
+Available operators: `equals`, `not_equals`, `in`, `not_in`, `pattern` (glob), `regex`, `exists`
+
+==== Size
+
+Match on file size in bytes. The `size` field uses its own byte-unit operators:
+
+[source,json]
+----
+{"size": {"gt_bytes":  104857600}}             <1>
+{"size": {"lte_bytes": 1048576}}               <2>
+{"size": {"between_bytes": [1024, 5242880]}}   <3>
+----
+<1> Greater than 100 MB
+<2> 1 MB or less
+<3> Between 1 KB and 5 MB
+
+Operators: `gt_bytes`, `gte_bytes`, `lt_bytes`, `lte_bytes`, `between_bytes`, `exists`
+
+NOTE: `size` is the actual downloaded byte count and is only known **after** the file is fetched — see <<two-pass>>.
+
+==== Geographic Bounding Box
+
+Matches if the notification's geometry falls within the box. Notifications with no geometry are passed through.
+
+[source,json]
+----
+{"bbox": {"north": 55.0, "south": 47.0, "east": 15.0, "west": 6.0}}
+----
+
+All four coordinates are required and are in decimal degrees.
+
+==== Dynamic Notification Properties
+
+Match against any field inside the WIS2 notification's `properties` object using the `property` key:
+
+[source,json]
+----
+{"property": "model_run",     "type": "string",   "equals": "00"}
+{"property": "forecast_hour", "type": "integer",  "lte": 48}
+{"property": "datetime",      "type": "datetime", "gte": "2024-01-01T00:00:00Z"}
+----
+
+Supported types: `string`, `integer`, `number`, `boolean`, `datetime`
+
+=== Combinators
+
+Conditions can be nested using logical combinators:
+
+[source,json]
+----
+{"all": [condition1, condition2]}   <1>
+{"any": [condition1, condition2]}   <2>
+{"not": condition}                  <3>
+----
+<1> AND — all sub-conditions must match
+<2> OR — any sub-condition must match
+<3> NOT — sub-condition must not match
+
+Example — accept only 00Z and 12Z runs with short-range forecasts from a specific centre:
+
+[source,json]
+----
+{
+  "all": [
+    {"centre_id": {"equals": "ca-eccc-msc"}},
+    {"any": [
+      {"property": "model_run", "type": "string", "equals": "00"},
+      {"property": "model_run", "type": "string", "equals": "12"}
+    ]},
+    {"property": "forecast_hour", "type": "integer", "lte": 48}
+  ]
+}
+----
+
+[[two-pass]]
+=== Pre-download and Post-download Evaluation
+
+WARNING: `media_type` and `size` are only known *after* the file has been downloaded. Filters are evaluated *twice*: once before downloading (pre-download) and once after (post-download). Rules that depend on `media_type` or `size` are silently skipped in the pre-download pass.
+
+This means the following filter **rejects everything** — the `media_type` rule never fires pre-download, and the `reject-all` rule fires instead:
+
+[source,json]
+----
+{
+  "rules": [
+    {"id": "accept-bufr", "order": 1,
+     "match": {"media_type": {"in": ["application/bufr"]}}, "action": "accept"},
+    {"id": "reject-all",  "order": 99,
+     "match": {"always": true}, "action": "reject"}
+  ]
+}
+----
+
+The correct pattern is to guard the reject rule with `media_type.exists`, so it only fires post-download when the type is actually known:
+
+[source,json]
+----
+{
+  "rules": [
+    {"id": "accept-bufr", "order": 1,
+     "match": {"media_type": {"in": ["application/bufr", "application/octet-stream"]}},
+     "action": "accept"},
+    {"id": "reject-wrong-type", "order": 2,
+     "match": {"media_type": {"exists": true}},
+     "action": "reject", "reason": "Media type not allowed"}
+  ]
+}
+----
+
+Pre-download: neither rule fires (both require a known `media_type`) → download proceeds. +
+Post-download: rule 1 accepts BUFR/octet-stream; rule 2 rejects everything else.
+
+=== Supported Media Types
+
+Default accepted types when no filter is specified:
+
+[cols="1,2"]
+|===
+|Category |Types
+
+|WMO Formats
+|`application/bufr`, `application/grib`
+
+|Scientific
+|`application/x-hdf`, `application/x-hdf5`, `application/x-netcdf`, `application/x-netcdf4`
+
+|Images
+|`image/gif`, `image/jpeg`, `image/png`, `image/tiff`
+
+|Documents
+|`application/pdf`, `application/postscript`
+
+|Text
+|`text/plain`, `text/html`, `text/xml`, `text/csv`, `text/tab-separated-values`
+
+|Binary
+|`application/octet-stream`
+|===
+
+=== Filter Examples
+
+==== Accept only BUFR and GRIB
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "wmo-formats-only",
+    "rules": [
+      {
+        "id": "accept-wmo",
+        "order": 1,
+        "match": {"media_type": {"in": ["application/bufr", "application/grib"]}},
+        "action": "accept"
+      },
+      {
+        "id": "reject-other",
+        "order": 2,
+        "match": {"media_type": {"exists": true}},
+        "action": "reject",
+        "reason": "Not a WMO format"
+      }
+    ]
+  }
+}
+----
+
+==== Reject files over 100 MB
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "size-limit",
+    "rules": [
+      {
+        "id": "reject-large",
+        "order": 1,
+        "match": {"size": {"gt_bytes": 104857600}},
+        "action": "reject",
+        "reason": "Exceeds 100 MB"
+      }
+    ]
+  }
+}
+----
+
+==== Data from a specific centre, short-range only
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "eccc-short-range",
+    "rules": [
+      {
+        "id": "reject-large",
+        "order": 1,
+        "match": {"size": {"gt_bytes": 104857600}},
+        "action": "reject",
+        "reason": "Exceeds 100 MB"
+      },
+      {
+        "id": "accept-short-range",
+        "order": 2,
+        "match": {
+          "all": [
+            {"property": "model_run",     "type": "string",  "in": ["00", "12"]},
+            {"property": "forecast_hour", "type": "integer", "lte": 48}
+          ]
+        },
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": {"always": true},
+        "action": "reject"
+      }
+    ]
+  }
+}
+----
+
+==== Geographic area filter
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "europe-only",
+    "rules": [
+      {
+        "id": "accept-europe",
+        "order": 1,
+        "match": {"bbox": {"north": 71.0, "south": 34.0, "east": 40.0, "west": -25.0}},
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": {"always": true},
+        "action": "reject",
+        "reason": "Outside European bounding box"
+      }
+    ]
+  }
+}
+----
+
+== Downloaded Files
+
+=== File Organization
+
+Files are organized under your target directory in a `YYYY/MM/DD` sub-directory based on the date the file was *downloaded* (not the observation time or data valid time):
+
+[source]
+----
+/data/
+└── surface-obs/           # Your target directory
+    └── 2026/
+        └── 03/
+            └── 05/        # Date downloaded (UTC)
+                ├── SYNOP_20260128T120000.bufr
+                ├── SYNOP_20260128T121500.bufr
+                └── ...
+----
+
+NOTE: The directory date reflects when the file arrived, not when the data was produced or is valid for. Files from older observation periods that arrive late will appear in the directory corresponding to their download date.
+
+=== File Naming
+
+Files retain their original names from the download URL. If a file with the same name already exists and is not an update, the download is skipped.
+
+=== Viewing Downloads
+
+[source,bash]
+----
+# List recent downloads
+ls -la downloads/surface-obs/$(date +%Y/%m/%d)/
+
+# Count files by type
+find downloads/ -name "*.bufr" | wc -l
+
+# Total size
+du -sh downloads/
+----
+
+NOTE: `du` reports disk usage based on filesystem block allocation, not raw byte count. Many small files (such as BUFR bulletins) consume a full block each regardless of their actual size, so `du` results will typically be larger than the sum of individual file sizes reported by `ls -la`.
+
+== Monitoring
+
+=== Health Check
+
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+Response:
+[source,json]
+----
+{"status": "healthy"}
+----
+
+=== Metrics
+
+View download statistics:
+
+[source,bash]
+----
+# Total downloads
+curl -s http://localhost:5002/metrics | grep wis2downloader_downloads_total
+
+# Failed downloads
+curl -s http://localhost:5002/metrics | grep wis2downloader_failed_total
+
+# Queue depth
+curl -s http://localhost:5002/metrics | grep wis2downloader_celery_queue_length
+----
+
+=== Dashboard View
+
+The integrated Dashboard (kbd:[Alt+1]) shows download rates, queue depth, disk usage, and byte totals in real time. No separate login is required.
+
+TIP: The Dashboard is embedded directly in the web interface — no need to open Grafana separately.
+
+== Common Use Cases
+
+=== Subscribe to All Surface Observations
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "synop"
+  }'
+----
+
+=== Subscribe to Specific Country
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/de-dwd/data/#",
+    "target": "dwd"
+  }'
+----
+
+=== Download Only BUFR and GRIB Files
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/#",
+    "target": "wmo-formats",
+    "filter": {
+      "name": "wmo-formats-only",
+      "rules": [
+        {
+          "id": "accept-wmo",
+          "order": 1,
+          "match": {"media_type": {"in": ["application/bufr", "application/grib"]}},
+          "action": "accept"
+        },
+        {
+          "id": "reject-other",
+          "order": 2,
+          "match": {"media_type": {"exists": true}},
+          "action": "reject",
+          "reason": "Not a WMO format"
+        }
+      ]
+    }
+  }'
+----
+
+=== Multiple Subscriptions
+
+Create separate subscriptions for different data types:
+
+[source,bash]
+----
+# Surface observations
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#", "target": "surface"}'
+
+# Upper air
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/upper-air-observations/#", "target": "upper-air"}'
+
+# Forecasts
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/prediction/#", "target": "forecasts"}'
+----
+
+== Troubleshooting
+
+=== No Files Downloaded
+
+1. Check subscription exists:
++
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+2. Check system health:
++
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+3. Check for skipped downloads (metrics):
++
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep skipped
+----
+
+=== Files Being Skipped
+
+Check the skip reason in metrics:
+
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep wis2downloader_skipped_total
+----
+
+Common reasons:
+
+* `PreviouslyProcessed` - File already downloaded (deduplication)
+* `FilterRejected` - Rejected by a filter rule
+* `GlobalCacheBlacklisted` - Cache excluded via `GC_EXCLUDE`
+
+=== Wrong File Types Downloaded
+
+Delete the existing subscription and recreate it with a `media_type` filter. Use `media_type.exists` as the reject guard — not `always: true` — so the reject rule only fires after the file type is known (see <<two-pass>>):
+
+[source,bash]
+----
+# List subscriptions to find the UUID
+curl http://localhost:5002/subscriptions
+
+# Delete old subscription by UUID
+curl -X DELETE http://localhost:5002/subscriptions/<id>
+
+# Create new subscription with filter
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "your-topic",
+    "target": "your-target",
+    "filter": {
+      "name": "bufr-only",
+      "rules": [
+        {
+          "id": "accept-bufr",
+          "order": 1,
+          "match": {"media_type": {"in": ["application/bufr", "application/octet-stream"]}},
+          "action": "accept"
+        },
+        {
+          "id": "reject-other",
+          "order": 2,
+          "match": {"media_type": {"exists": true}},
+          "action": "reject",
+          "reason": "Media type not allowed"
+        }
+      ]
+    }
+  }'
+----
+
+=== Everything Being Rejected by Filter
+
+If all notifications are rejected with reason `FilterRejected`, the most common cause is an `always: true` reject rule firing pre-download before `media_type` is known.
+
+Check your filter: if you have a `media_type` accept rule followed by an `always: true` reject rule, the accept rule will never fire pre-download because `media_type` is only known after download. Replace the `always: true` reject with `media_type.exists: true` — see <<two-pass>>.

@@ -1,0 +1,21 @@
+= Documentation WIS2 Downloader
+:toc: left
+:toc-title: Sommaire
+:toclevels: 2
+:icons: font
+
+[NOTE]
+====
+Ce document a été traduit automatiquement depuis l'anglais par Claude AI.
+Les termes du domaine WMO/météorologique doivent être vérifiés par un locuteur natif avant
+toute utilisation en production. Consultez le lien:../en/[document original en anglais] pour la version faisant autorité.
+====
+
+Bienvenue dans la documentation de WIS2 Downloader.
+
+== Guides
+
+* link:user-guide.html[Guide utilisateur] — Démarrage rapide, interface web, création d'abonnements
+* link:admin-guide.html[Guide d'administration] — Déploiement, configuration, surveillance
+* link:developer-guide.html[Guide du développeur] — Architecture, contribution, extension du système
+* link:api-reference.html[Référence API] — Points de terminaison REST API et formats de données

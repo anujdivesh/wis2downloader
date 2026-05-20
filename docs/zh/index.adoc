@@ -1,0 +1,21 @@
+= WIS2 Downloader 文档
+:toc: left
+:toc-title: 目录
+:toclevels: 2
+:icons: font
+
+[NOTE]
+====
+本文档由 Claude AI 从英文自动翻译。
+WMO/气象领域术语在正式使用前应由母语人士审阅。
+请参阅 link:../en/[英文原版] 以获取权威版本。
+====
+
+欢迎阅读 WIS2 Downloader 文档。
+
+== 指南
+
+* link:user-guide.html[用户指南] — 快速入门、Web 界面、创建订阅
+* link:admin-guide.html[管理指南] — 部署、配置、监控
+* link:developer-guide.html[开发者指南] — 架构、贡献、扩展
+* link:api-reference.html[API 参考] — REST API 端点和数据格式

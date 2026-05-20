@@ -1,0 +1,41 @@
+from celery import Celery
+import os
+import sys
+
+from shared.logging import setup_logging
+from shared.redis_client import (REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_DB)
+
+# Set up logging
+setup_logging()  # Configure root logger
+LOGGER = setup_logging(__name__)
+
+if not REDIS_PASSWORD:
+    raise ValueError("REDIS_PASSWORD must be set")
+
+CELERY_BACKEND_DB = int(os.getenv("CELERY_BACKEND_DB", "0"))
+CELERY_RESULT_DB = int(os.getenv("CELERY_RESULT_DB", "1"))
+
+CELERY_BROKER_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{CELERY_BACKEND_DB}"
+CELERY_RESULT_BACKEND = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{CELERY_RESULT_DB}"
+
+# --- Celery App Setup ---
+app = Celery('tasks',
+             broker=CELERY_BROKER_URL,
+             result_backend=CELERY_RESULT_BACKEND)
+
+app.conf.worker_log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
+app.conf.result_expires = 86400  # 1 day, or do we want 1 hour? (TBD)
+app.conf.update(
+    task_serializer='json',
+    accept_content=['json'],
+    result_serializer='json'
+)
+
+# Import your tasks
+app.autodiscover_tasks(['task_manager.tasks','task_manager.tasks.wis2' ])
+
+def main():
+    app.start(argv=sys.argv[1:])
+
+if __name__ == '__main__':
+    main()

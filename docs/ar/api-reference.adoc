@@ -1,0 +1,551 @@
+= مرجع API لـ WIS2 Downloader
+:toc: right
+:toc-title: المحتويات
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+:lang: ar
+:docinfo: shared
+
+
+[NOTE]
+====
+تُرجمت هذه الوثيقة آليًا من الإنجليزية باستخدام Claude AI.
+ينبغي مراجعة المصطلحات المتعلقة بمجال WMO/الأرصاد الجوية من قِبل متحدث أصلي قبل
+الاستخدام الإنتاجي. راجع link:../en/[النسخة الإنجليزية الأصلية] للاطلاع على النسخة المرجعية.
+====
+
+== نظرة عامة
+
+يوفر WIS2 Downloader واجهة برمجية REST لإدارة الاشتراكات ومراقبة النظام.
+
+* **عنوان URL الأساسي:** `http://localhost:5002`
+* **مواصفات OpenAPI:** `http://localhost:5002/openapi`
+* **واجهة Swagger:** `http://localhost:5002/swagger`
+
+== المصادقة
+
+لا تتطلب واجهة API حاليًا أي مصادقة. في بيئة الإنتاج، يُنصح بوضعها خلف بروكسي عكسي يوفر المصادقة.
+
+== API الاشتراكات
+
+=== عرض الاشتراكات
+
+يعيد جميع الاشتراكات النشطة.
+
+[source,http]
+----
+GET /subscriptions
+----
+
+==== الاستجابة
+
+[cols="1,3"]
+|===
+|الحالة |الوصف
+
+|200
+|نجاح — يعيد خريطة من الموضوع إلى تفاصيل الاشتراك
+
+|503
+|Redis غير متاح
+|===
+
+==== مثال
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+[source,json]
+----
+{
+  "cache/a/wis2/+/data/core/weather/surface-based-observations/#": {
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "save_path": "surface-obs",
+    "filters": {
+      "accepted_media_types": ["application/bufr", "application/grib"]
+    }
+  }
+}
+----
+
+=== إنشاء اشتراك
+
+ينشئ اشتراكًا جديدًا في موضوع WIS2.
+
+[source,http]
+----
+POST /subscriptions
+Content-Type: application/json
+----
+
+==== جسم الطلب
+
+[cols="1,1,1,3"]
+|===
+|الحقل |النوع |مطلوب |الوصف
+
+|`topic`
+|string
+|نعم
+|نمط موضوع MQTT في WIS2. يدعم `+` (مستوى واحد) و`#` (متعدد المستويات) كأحرف بدل.
+
+|`target`
+|string
+|لا
+|مجلد فرعي تحت `/data` لحفظ الملفات فيه.
+
+|`filters`
+|object
+|لا
+|إعداد الفلتر.
+
+|`filters.accepted_media_types`
+|array
+|لا
+|قائمة أنواع MIME المسموح بها. تدعم أحرف البدل (مثل `application/x-grib*`).
+|===
+
+==== الاستجابة
+
+[cols="1,3"]
+|===
+|الحالة |الوصف
+
+|202
+|مقبول — تم إدراج الاشتراك في قائمة الانتظار للمعالجة
+
+|400
+|طلب غير صحيح — الموضوع مفقود أو غير صالح
+
+|503
+|الخدمة غير متاحة — فشل الاتصال بـ Redis
+|===
+
+==== ترويسات الاستجابة
+
+[cols="1,3"]
+|===
+|الترويسة |الوصف
+
+|`Location`
+|عنوان URL لاسترداد تفاصيل الاشتراك
+|===
+
+==== مثال
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "surface-obs",
+    "filters": {
+      "accepted_media_types": ["application/bufr", "application/grib"]
+    }
+  }'
+----
+
+[source,json]
+----
+{
+  "status": "accepted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "target": "surface-obs"
+}
+----
+
+=== الحصول على اشتراك
+
+يعيد تفاصيل اشتراك محدد.
+
+[source,http]
+----
+GET /subscriptions/{topic}
+----
+
+==== معاملات المسار
+
+[cols="1,1,3"]
+|===
+|المعامل |النوع |الوصف
+
+|`topic`
+|string
+|موضوع WIS2 (يتطلب `#` فقط ترميز URL كـ `%23`)
+|===
+
+==== ترميز URL
+
+يتطلب ترميز URL للحرف `#` فقط:
+
+[cols="1,1,2"]
+|===
+|الحرف |المُرمَّز |السبب
+
+|`#`
+|`%23`
+|وإلا يُفسَّر كجزء من URL
+|===
+
+NOTE: لا تتطلب الشُّرَط المائلة (`/`) والـ`+` أي ترميز في المسار.
+
+==== الاستجابة
+
+[cols="1,3"]
+|===
+|الحالة |الوصف
+
+|200
+|نجاح
+
+|400
+|موضوع غير صالح
+
+|404
+|الاشتراك غير موجود
+
+|503
+|Redis غير متاح
+|===
+
+==== مثال
+
+[source,bash]
+----
+curl "http://localhost:5002/subscriptions/cache/a/wis2/+/data/core/weather/surface-based-observations/%23"
+----
+
+[source,json]
+----
+{
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "save_path": "surface-obs",
+  "filters": {
+    "accepted_media_types": ["application/bufr", "application/grib"]
+  }
+}
+----
+
+=== حذف اشتراك
+
+يزيل اشتراكًا.
+
+[source,http]
+----
+DELETE /subscriptions/{topic}
+----
+
+==== معاملات المسار
+
+[cols="1,1,3"]
+|===
+|المعامل |النوع |الوصف
+
+|`topic`
+|string
+|موضوع WIS2 مُرمَّز بـ URL
+|===
+
+==== الاستجابة
+
+[cols="1,3"]
+|===
+|الحالة |الوصف
+
+|200
+|تم الحذف بنجاح
+
+|400
+|موضوع غير صالح
+
+|503
+|Redis غير متاح
+|===
+
+==== مثال
+
+[source,bash]
+----
+curl -X DELETE "http://localhost:5002/subscriptions/cache/a/wis2/+/data/core/weather/surface-based-observations/%23"
+----
+
+[source,json]
+----
+{
+  "status": "deleted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#"
+}
+----
+
+== API المراقبة
+
+=== فحص الصحة
+
+يعيد حالة صحة الخدمة.
+
+[source,http]
+----
+GET /health
+----
+
+==== الاستجابة
+
+يعيد دائمًا 200. تحقق من حقل `status` للحالة الفعلية.
+
+[cols="1,3"]
+|===
+|الحقل |القيم
+
+|`status`
+|`healthy` أو `unhealthy`
+|===
+
+==== مثال
+
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+[source,json]
+----
+{"status": "healthy"}
+----
+
+=== مقاييس Prometheus
+
+يعيد المقاييس بصيغة نص Prometheus.
+
+[source,http]
+----
+GET /metrics
+----
+
+==== الاستجابة
+
+[cols="1,3"]
+|===
+|الحالة |الوصف
+
+|200
+|مقاييس بصيغة نص Prometheus
+
+|500
+|خطأ في توليد المقاييس
+|===
+
+==== المقاييس المتاحة
+
+[cols="2,1,2,3"]
+|===
+|المقياس |النوع |التسميات |الوصف
+
+|`wis2downloader_notifications_total`
+|Counter
+|status
+|إجمالي الإشعارات المعالَجة
+
+|`wis2downloader_downloads_total`
+|Counter
+|cache, media_type
+|الملفات المُنزَّلة بنجاح
+
+|`wis2downloader_downloads_bytes_total`
+|Counter
+|cache, media_type
+|إجمالي البايتات المُنزَّلة
+
+|`wis2downloader_skipped_total`
+|Counter
+|reason
+|الإشعارات المتخطاة حسب السبب
+
+|`wis2downloader_failed_total`
+|Counter
+|cache, reason
+|التنزيلات الفاشلة
+
+|`wis2downloader_celery_queue_length`
+|Gauge
+|queue_name
+|المهام الحالية في قائمة انتظار Celery
+|===
+
+==== مثال
+
+[source,bash]
+----
+curl http://localhost:5002/metrics
+----
+
+[source,prometheus]
+----
+# HELP wis2downloader_downloads_total Total number of files downloaded.
+# TYPE wis2downloader_downloads_total counter
+wis2downloader_downloads_total{cache="example.cache.com",media_type="application/bufr"} 42.0
+
+# HELP wis2downloader_notifications_total Total notifications processed.
+# TYPE wis2downloader_notifications_total counter
+wis2downloader_notifications_total{status="success"} 42.0
+wis2downloader_notifications_total{status="skipped"} 5.0
+----
+
+=== مواصفة OpenAPI
+
+تعيد مواصفة OpenAPI 3.0 بصيغة JSON.
+
+[source,http]
+----
+GET /openapi
+----
+
+=== واجهة Swagger
+
+توثيق API تفاعلي.
+
+[source,http]
+----
+GET /
+GET /swagger
+----
+
+== استجابات الأخطاء
+
+تتبع جميع استجابات الأخطاء هذا التنسيق:
+
+[source,json]
+----
+{
+  "error": "Error message describing the problem"
+}
+----
+
+=== رسائل الخطأ الشائعة
+
+[cols="1,1,2"]
+|===
+|الحالة |الخطأ |السبب
+
+|400
+|"No topic provided"
+|POST /subscriptions بدون حقل الموضوع
+
+|400
+|"No topic passed"
+|GET/DELETE بموضوع فارغ
+
+|404
+|"Subscription for topic X not found"
+|الموضوع غير مشترك
+
+|503
+|"Failed to connect to Redis: ..."
+|Redis غير متاح
+
+|503
+|"Failed to queue subscription command..."
+|فشل Redis pub/sub
+
+|503
+|"Failed to persist subscription..."
+|فشل الكتابة في Redis
+|===
+
+== مخططات البيانات
+
+=== الاشتراك
+
+[source,json]
+----
+{
+  "topic": "string (required) - WIS2 MQTT topic pattern",
+  "save_path": "string | null - Subdirectory for downloads",
+  "filters": {
+    "accepted_media_types": ["array of MIME type strings"]
+  }
+}
+----
+
+=== الفلاتر
+
+[source,json]
+----
+{
+  "accepted_media_types": [
+    "application/bufr",
+    "application/grib",
+    "application/x-netcdf*"
+  ]
+}
+----
+
+==== أنواع الوسائط المقبولة افتراضيًا
+
+عند عدم تحديد أي فلتر، تُقبل هذه الأنواع:
+
+[source,json]
+----
+[
+  "image/gif", "image/jpeg", "image/png", "image/tiff",
+  "application/pdf", "application/postscript",
+  "application/bufr", "application/grib",
+  "application/x-hdf", "application/x-hdf5",
+  "application/x-netcdf", "application/x-netcdf4",
+  "text/plain", "text/html", "text/xml", "text/csv",
+  "text/tab-separated-values"
+]
+----
+
+== مرجع أنماط الموضوعات
+
+=== هيكل موضوع WIS2
+
+[source]
+----
+{origin|cache}/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+----
+
+* `origin` - البيانات الأصلية من مزود البيانات
+* `cache` - نسخة مخزنة مؤقتًا من ذاكرة تخزين عالمية (مُنصح به للموثوقية)
+* `{centre-id}` - رمز الدولة/المنظمة، مسبوقًا برمز الدولة ISO2C (مثل `de-dwd`)
+* `{data-policy}` - سياسة البيانات الموحدة لـ WMO: `core` أو `recommended`
+* `{earth-system-domain}` - نطاق النظام الأرضي من سياسة البيانات الموحدة لـ WMO
+
+=== أحرف البدل
+
+[cols="1,1,3"]
+|===
+|النمط |الرمز |الوصف
+
+|مستوى واحد
+|`+`
+|يطابق مستوى واحدًا تمامًا
+
+|متعدد المستويات
+|`#`
+|يطابق صفرًا أو أكثر من المستويات (يجب أن يكون في النهاية)
+|===
+
+=== أمثلة
+
+[cols="2,3"]
+|===
+|النمط |ما يطابقه
+
+|`cache/a/wis2/de-dwd/data/#`
+|جميع البيانات من Deutscher Wetterdienst
+
+|`cache/a/wis2/+/data/core/weather/surface-based-observations/#`
+|ملاحظات سطحية من جميع المراكز
+
+|`cache/a/wis2/+/data/core/#`
+|جميع البيانات الأساسية من أي مركز
+
+|`cache/a/wis2/+/data/+/weather/#`
+|جميع بيانات الطقس (أي سياسة) من أي مركز
+|===

@@ -1,0 +1,755 @@
+= WIS2 Downloader Administration Guide
+:toc: left
+:toc-title: Contents
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+== Deployment
+
+=== Prerequisites
+
+* Docker 20.10+
+* Docker Compose 2.0+
+* 4GB RAM minimum (8GB recommended for production)
+* Network access to WIS2 Global Broker (port 443)
+
+=== Installation
+
+[source,bash]
+----
+git clone https://github.com/World-Meteorological-Organization/wis2downloader
+cd wis2downloader
+cp default.env .env
+----
+
+Edit `.env` to configure your deployment, then start:
+
+[source,bash]
+----
+docker-compose up -d
+----
+
+=== Security Configuration
+
+IMPORTANT: Before deploying to production, you must configure these security settings in your `.env` file:
+
+1. **`REDIS_PASSWORD`** - Set a strong, unique password (required)
+2. **`FLASK_SECRET_KEY`** - Set a cryptographically random secret key (required)
+3. **`FLASK_DEBUG`** - Set to `false` for production
+4. **Grafana password** - Change from default `admin/admin` after first login
+
+The `.env` file contains sensitive credentials. Ensure it is:
+
+* Not committed to version control (add to `.gitignore`)
+* Readable only by the deployment user (`chmod 600 .env`)
+* Backed up securely
+
+==== Access Control
+
+WARNING: WIS2 Downloader does not implement authentication or authorisation on the web interface or the subscription manager REST API. Anyone with network access to the UI (port 8080) or the API (port 5002) can view, create, modify, and delete subscriptions.
+
+In a shared or internet-facing environment you *must* restrict access at the network level. Recommended approaches:
+
+* **Reverse proxy with authentication** — Place nginx or Caddy in front of the UI and API ports, enforcing HTTP Basic Auth or OAuth before forwarding requests.  A minimal nginx configuration:
++
+[source,nginx]
+----
+location / {
+    auth_basic           "WIS2 Downloader";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    proxy_pass           http://localhost:8080;
+}
+----
+* **Firewall rules** — Restrict ports 8080 and 5002 to trusted IP ranges using `iptables`, `ufw`, or cloud security groups.
+* **VPN / private network** — Deploy behind a VPN so that only authenticated VPN users can reach the services.
+
+If the system is running on a server rather than localhost, ensure port 8080 and 5002 are not publicly reachable before adding one of the access controls above.
+
+=== Volume Permissions
+
+The application containers run as a non-root user (`wis2`) for security. To allow containers to write downloaded files to the host filesystem, you must configure proper permissions on the `downloads/` directory.
+
+==== Container User Details
+
+[cols="1,2"]
+|===
+|Property |Value
+
+|Username
+|`wis2`
+
+|User ID (UID)
+|`10001`
+
+|Group name
+|`wis2`
+
+|Group ID (GID)
+|`988`
+|===
+
+The Celery worker writes files to `/data` inside the container, which maps to `./downloads/` on the host.
+
+==== Option 1: Create Matching User/Group (Recommended)
+
+Create a user and group on the host system that matches the container's UID/GID:
+
+[source,bash]
+----
+# Create the wis2 group with GID 988
+sudo groupadd -g 988 wis2
+
+# Create the wis2 user with UID 10001
+sudo useradd -u 10001 -g wis2 -M -s /usr/sbin/nologin wis2
+
+# Set ownership on the downloads directory
+sudo mkdir -p downloads
+sudo chown -R wis2:wis2 downloads
+----
+
+==== Option 2: Use ACLs (Flexible)
+
+If you cannot create a matching user/group, use POSIX Access Control Lists to grant the container's UID write access:
+
+[source,bash]
+----
+# Ensure ACL support is installed
+sudo apt-get install acl  # Debian/Ubuntu
+sudo yum install acl      # RHEL/CentOS
+
+# Create the downloads directory
+mkdir -p downloads
+
+# Grant UID 10001 full access
+sudo setfacl -R -m u:10001:rwx downloads
+sudo setfacl -R -d -m u:10001:rwx downloads  # Default ACL for new files
+----
+
+==== Option 3: Permissive Directory
+
+WARNING: This approach is less secure and not recommended for production.
+
+[source,bash]
+----
+mkdir -p downloads
+chmod 777 downloads
+----
+
+==== Verifying Permissions
+
+Test that the container can write to the volume:
+
+[source,bash]
+----
+# Start the celery container
+docker-compose up -d celery
+
+# Test write access from inside the container
+docker exec celery touch /data/test-write && echo "Write OK" || echo "Write FAILED"
+
+# Clean up
+docker exec celery rm -f /data/test-write
+----
+
+If the test fails with "Permission denied", review the ownership and permissions of the `downloads/` directory on the host.
+
+==== Shared Access with Host Users
+
+If you need host users to read downloaded files, add them to the `wis2` group:
+
+[source,bash]
+----
+# Add your user to the wis2 group
+sudo usermod -aG wis2 $USER
+
+# Log out and back in for group membership to take effect
+# Then verify
+groups  # Should include 'wis2'
+----
+
+Alternatively, use ACLs to grant read access to specific users:
+
+[source,bash]
+----
+# Grant read access to a specific user
+sudo setfacl -R -m u:youruser:rx downloads
+sudo setfacl -R -d -m u:youruser:rx downloads
+----
+
+=== Verifying Deployment
+
+NOTE: The examples below use `localhost`. If the system is deployed on a remote server, replace `localhost` with the server's hostname or IP address. The ports (5002 for the API, 8080 for the UI) can be changed in `docker-compose.yaml` if required.
+
+[source,bash]
+----
+# Check all services are running
+docker-compose ps
+
+# Check health endpoint (subscription manager)
+curl http://localhost:5002/health
+
+# Check web UI is up
+curl -o /dev/null -s -w "%{http_code}" http://localhost:8080
+
+# View logs
+docker-compose logs -f subscriber
+----
+
+== Configuration
+
+=== Environment Variables
+
+==== Application Settings
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Default |Description
+
+|`LOG_LEVEL`
+|string
+|`DEBUG`
+|Logging level: DEBUG, INFO, WARNING, ERROR
+
+|`DATA_PATH`
+|path
+|`/data`
+|Base directory for downloaded files
+
+|`FLASK_SECRET_KEY`
+|string
+|_required_
+|Flask session secret key (application fails if not set)
+
+|`FLASK_DEBUG`
+|boolean
+|`false`
+|Enable Flask debug mode (set to `false` in production)
+
+|`FLASK_HOST`
+|string
+|`0.0.0.0`
+|API bind address
+
+|`FLASK_PORT`
+|integer
+|`5001`
+|API bind port (internal)
+|===
+
+==== MQTT Broker Settings
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Default |Description
+
+|`GLOBAL_BROKER_HOST`
+|string
+|_required_
+|WIS2 Global Broker hostname (e.g., `globalbroker.meteo.fr`)
+
+|`GLOBAL_BROKER_PORT`
+|integer
+|`443`
+|Broker port
+
+|`GLOBAL_BROKER_USERNAME`
+|string
+|`everyone`
+|MQTT username
+
+|`GLOBAL_BROKER_PASSWORD`
+|string
+|`everyone`
+|MQTT password
+
+|`MQTT_PROTOCOL`
+|string
+|`websockets`
+|Transport protocol: `websockets` or `tcp`
+
+|`MQTT_SESSION_ID`
+|string
+|_auto-generated_
+|Persistent session ID for resuming after restart
+|===
+
+==== Redis Settings
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Default |Description
+
+|`REDIS_HOST`
+|string
+|`redis`
+|Redis server hostname
+
+|`REDIS_PORT`
+|integer
+|`6379`
+|Redis server port
+
+|`REDIS_DATABASE`
+|integer
+|`0`
+|Redis database number
+
+|`REDIS_PASSWORD`
+|string
+|_required_
+|Redis authentication password (application fails if not set)
+
+|`REDIS_TTL_SECONDS`
+|integer
+|`3600`
+|TTL for deduplication keys
+
+|`REDIS_MESSAGE_LOCK`
+|integer
+|`300`
+|Lock expiration for concurrent download prevention
+|===
+
+==== Celery Settings
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Default |Description
+
+|`CELERY_BROKER_URL`
+|string
+|`redis://:${REDIS_PASSWORD}@redis:6379/0`
+|Celery broker connection string (note password format)
+
+|`CELERY_RESULT_BACKEND`
+|string
+|`redis://:${REDIS_PASSWORD}@redis:6379/1`
+|Result backend connection string (note password format)
+|===
+
+==== Download Filtering
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Default |Description
+
+|`GC_EXCLUDE`
+|string
+|_empty_
+|Comma-separated list of global cache hostnames to exclude
+|===
+
+==== Web UI Settings
+
+[cols="2,1,1,4"]
+|===
+|Variable |Type |Default |Description
+
+|`WIS2_SUBSCRIPTION_MANAGER_URL`
+|string
+|`http://subscription-manager:5001`
+|Internal URL the UI uses to reach the subscription manager API
+
+|`WIS2_GRAFANA_URL`
+|string
+|`http://localhost:3000`
+|URL used to embed Grafana panels in the Dashboard view
+
+|`STORAGE_SECRET`
+|string
+|`wis2box-rx-secret`
+|NiceGUI session storage secret key — set a unique value in production
+
+|`GDC_CACHE_TTL_SECONDS`
+|integer
+|`21600`
+|Seconds to cache GDC catalogue data in Redis (default 6 hours); set to `0` to always fetch live
+|===
+
+=== File Structure
+
+[source]
+----
+wis2downloader/
+├── config/
+│   ├── grafana/provisioning/    # Grafana datasource config
+│   ├── loki/                    # Loki configuration
+│   └── prometheus/              # Prometheus scrape config
+├── containers/                  # Dockerfiles
+├── downloads/                   # Downloaded data (mounted volume)
+├── modules/                     # Python modules
+│   ├── shared/                  # Shared utilities
+│   ├── subscriber/              # MQTT subscriber
+│   ├── subscription_manager/    # REST API
+│   ├── task_manager/            # Celery tasks
+│   └── ui/                      # NiceGUI web interface
+├── docker-compose.yaml
+├── default.env
+└── README.adoc
+----
+
+== Scaling
+
+=== Redis
+
+The system uses a single Redis instance for:
+
+* Pub/Sub messaging between services
+* Subscription state storage
+* Deduplication tracking
+* Celery task queue and results
+
+The system uses a single Redis instance and does not provide high availability. Regardless of scale, ensure Redis data is durable:
+
+* Enable Redis persistence (AOF + RDB)
+* Implement regular backups of the Redis dump
+
+=== Scaling Workers
+
+Increase Celery worker concurrency for higher throughput:
+
+[source,yaml]
+----
+# docker-compose.yaml
+celery:
+  command: ["... --concurrency=16 ..."]
+----
+
+Or run multiple worker containers:
+
+[source,bash]
+----
+docker-compose up -d --scale celery=3
+----
+
+=== Adding Global Brokers
+
+Each subscriber service connects to a single WIS2 Global Broker. To receive data from multiple brokers, add additional subscriber services to `docker-compose.yaml`:
+
+[source,yaml]
+----
+  subscriber-france:
+    container_name: subscriber-france
+    restart: always
+    build:
+      context: .
+      dockerfile: ./containers/subscriber/Dockerfile
+    env_file: *default-env
+    environment:
+      GLOBAL_BROKER_HOST: globalbroker.meteo.fr
+      GLOBAL_BROKER_PORT: 443
+      GLOBAL_BROKER_USERNAME: everyone
+      GLOBAL_BROKER_PASSWORD: everyone
+      MQTT_PROTOCOL: websockets
+    depends_on:
+      - redis
+    networks:
+      - redis-net
+    logging: *default-logging
+
+  subscriber-china:
+    container_name: subscriber-china
+    restart: always
+    build:
+      context: .
+      dockerfile: ./containers/subscriber/Dockerfile
+    env_file: *default-env
+    environment:
+      GLOBAL_BROKER_HOST: gb.wis.cma.cn
+      GLOBAL_BROKER_PORT: 443
+      GLOBAL_BROKER_USERNAME: everyone
+      GLOBAL_BROKER_PASSWORD: everyone
+      MQTT_PROTOCOL: websockets
+    depends_on:
+      - redis
+    networks:
+      - redis-net
+    logging: *default-logging
+----
+
+IMPORTANT: Each subscriber must have a unique `container_name`.
+
+All subscribers share the same Redis backend, so subscriptions created via the API are received by all subscriber instances. Downloads are deduplicated, so the same file won't be downloaded twice even if notifications arrive from multiple brokers.
+
+== Monitoring
+
+=== Prometheus Metrics
+
+Metrics endpoint: `http://localhost:5002/metrics`
+
+NOTE: Metrics are stored atomically in Redis using `HINCRBYFLOAT` and exposed at the `/metrics` endpoint in Prometheus text format. This approach is safe across multiple Celery worker containers without requiring a shared filesystem or the `prometheus_client` multiprocess directory.
+
+==== Available Metrics
+
+[cols="2,1,3"]
+|===
+|Metric |Type |Description
+
+|`wis2downloader_notifications_received_total`
+|Counter
+|MQTT messages received before queuing (labels: broker); compare against `notifications_total` to detect queue failures
+
+|`wis2downloader_notifications_total`
+|Counter
+|Total notifications processed by Celery (labels: status)
+
+|`wis2downloader_downloads_total`
+|Counter
+|Successfully downloaded files (labels: cache, media_type)
+
+|`wis2downloader_downloads_bytes_total`
+|Counter
+|Total bytes downloaded (labels: cache, media_type)
+
+|`wis2downloader_skipped_total`
+|Counter
+|Skipped notifications by reason (labels: reason)
+
+|`wis2downloader_failed_total`
+|Counter
+|Failed downloads (labels: cache, reason)
+
+|`wis2downloader_queue_errors_total`
+|Counter
+|Failures to queue a Celery task from the subscriber (labels: broker)
+
+|`wis2downloader_celery_queue_length`
+|Gauge
+|Current number of tasks in the Celery queue
+
+|`wis2downloader_disk_total_bytes`
+|Gauge
+|Total disk capacity of the download volume
+
+|`wis2downloader_disk_used_bytes`
+|Gauge
+|Disk space used on the download volume
+
+|`wis2downloader_disk_free_bytes`
+|Gauge
+|Disk space available on the download volume
+
+|`wis2downloader_disk_downloads_bytes`
+|Gauge
+|Bytes used by downloaded files (tracked incrementally)
+|===
+
+==== Example Queries
+
+[source,promql]
+----
+# Download rate per minute
+sum(rate(wis2downloader_downloads_total[1m]))
+
+# Downloads by cache
+sum by (cache) (rate(wis2downloader_downloads_total[5m]))
+
+# Failed downloads by reason
+sum by (reason) (wis2downloader_failed_total)
+
+# Bytes downloaded in last hour
+sum(increase(wis2downloader_downloads_bytes_total[1h]))
+
+# Queue depth
+wis2downloader_celery_queue_length
+----
+
+=== Grafana
+
+Access Grafana at `http://localhost:3000` (default credentials: admin/admin)
+
+IMPORTANT: Change the default Grafana password after first login or configure via `GF_SECURITY_ADMIN_PASSWORD` environment variable in production deployments.
+
+Pre-configured datasources:
+
+* Prometheus - `http://prometheus:9090`
+* Loki - `http://loki:3100`
+
+=== Logging
+
+All services log to stdout with UTC timestamps:
+
+[source]
+----
+2026-01-28T10:15:30.123Z subscriber INFO Connected successfully
+----
+
+View logs via Docker:
+
+[source,bash]
+----
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f celery
+
+# With timestamps
+docker-compose logs -f -t subscriber
+----
+
+Logs are also collected by Loki and queryable in Grafana.
+
+== Maintenance
+
+=== Backup
+
+==== Redis Data
+
+[source,bash]
+----
+# Trigger RDB snapshot
+docker exec redis redis-cli -a $REDIS_PASSWORD BGSAVE
+
+# Copy snapshot
+docker cp redis:/data/dump.rdb ./backup/
+----
+
+==== Downloaded Files
+
+[source,bash]
+----
+# Backup downloads directory
+tar -czf wis2-downloads-$(date +%Y%m%d).tar.gz downloads/
+----
+
+=== Clearing Data
+
+WARNING: These operations are destructive.
+
+[source,bash]
+----
+# Clear all subscriptions
+docker exec redis redis-cli -a $REDIS_PASSWORD DEL global:subscriptions
+
+# Clear deduplication cache (allows re-download of all data)
+docker exec redis redis-cli -a $REDIS_PASSWORD KEYS "wis2:notifications:*" | xargs -r docker exec -i redis redis-cli -a $REDIS_PASSWORD DEL
+
+# Clear downloaded files
+rm -rf downloads/*
+----
+
+=== Restarting Services
+
+[source,bash]
+----
+# Restart single service
+docker-compose restart subscriber
+
+# Restart all services
+docker-compose restart
+
+# Full rebuild (after code changes)
+docker-compose build && docker-compose up -d
+----
+
+== Troubleshooting
+
+=== Service Won't Start
+
+[source,bash]
+----
+# Check logs
+docker-compose logs <service-name>
+
+# Check container status
+docker-compose ps
+
+# Verify environment
+docker-compose config
+----
+
+=== No Downloads
+
+1. Check subscriber is connected:
++
+[source,bash]
+----
+docker-compose logs subscriber | grep -i connect
+----
+
+2. Verify subscription exists:
++
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+3. Check Celery worker is processing:
++
+[source,bash]
+----
+docker-compose logs celery | tail -50
+----
+
+4. Check queue depth:
++
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep queue_length
+----
+
+=== Redis Connection Errors
+
+1. Check Redis is running:
++
+[source,bash]
+----
+docker exec redis redis-cli -a $REDIS_PASSWORD PING
+----
+
+2. Verify network connectivity:
++
+[source,bash]
+----
+docker network inspect wis2downloader_redis-net
+----
+
+=== High Memory Usage
+
+* Increase `max-tasks-per-child` to recycle workers more frequently
+* Reduce worker concurrency
+* Check for large files overwhelming workers
+
+=== Metrics Not Updating
+
+* Prometheus scrape interval is 15 seconds by default
+* Check Prometheus targets: `http://localhost:9090/targets`
+* Verify metrics endpoint: `curl http://localhost:5002/metrics`
+
+=== Web UI: Catalogue Data Not Loaded
+
+If the Catalogue Search or Tree Search views show "Catalogue data not loaded":
+
+1. Check whether the UI container started successfully:
++
+[source,bash]
+----
+docker-compose logs wis2downloader-ui | tail -30
+----
+
+2. Confirm the GDC cache keys exist in Redis:
++
+[source,bash]
+----
+docker exec redis redis-cli -a $REDIS_PASSWORD KEYS "gdc:cache:*"
+----
++
+If no keys are present, the initial fetch either failed or is still in progress. Wait a moment and reload the page.
+
+3. Force a fresh fetch from the Settings view (`http://localhost:8080`) by clicking *Refresh GDC data*, or by restarting the UI container:
++
+[source,bash]
+----
+docker-compose restart wis2downloader-ui
+----
+
+4. If the GDC fetch consistently fails, check network connectivity from the UI container to the public GDC endpoints:
++
+[source,bash]
+----
+docker exec wis2downloader-ui curl -s -o /dev/null -w "%{http_code}" \
+  https://wis2-gdc.weather.gc.ca/collections/wis2-discovery-metadata/items?limit=1
+----

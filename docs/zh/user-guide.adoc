@@ -1,0 +1,927 @@
+= WIS2 Downloader 用户指南
+:toc: left
+:toc-title: 目录
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+:sectnums:
+
+[NOTE]
+====
+本文档由 Claude AI 从英文自动翻译。
+WMO/气象领域术语在正式使用前应由母语人士审阅。
+请参阅 link:../en/[英文原版] 以获取权威版本。
+====
+
+== 简介
+
+WIS2 Downloader 根据您的订阅自动从 WIS2（WMO 信息系统 2.0）全球缓存下载数据。您创建订阅来指定感兴趣的数据主题，系统负责下载和整理文件。
+
+订阅可通过基于浏览器的 Web 界面创建（推荐），也可直接通过 REST API 创建。
+
+== Web 界面
+
+Web 界面可通过 `http://<host>:8080` 访问（本地运行时默认为 `http://localhost:8080`）。实际的主机名和端口取决于系统的部署方式——如果是访问共享实例，请咨询管理员。
+
+它提供了一种可视化方式来发现可用的 WIS2 数据集、浏览主题层次结构，并无需直接使用 REST API 即可创建订阅。
+
+=== 界面语言
+
+页眉右上角的语言选择器可切换界面语言。所选语言将在浏览器会话中被记住。
+
+支持的语言：
+
+[cols="1,1"]
+|===
+|语言 |文字方向
+
+|English
+|从左到右
+
+|Français (French)
+|从左到右
+
+|Español (Spanish)
+|从左到右
+
+|العربية (Arabic)
+|从右到左
+
+|中文 (Chinese)
+|从左到右
+
+|Русский (Russian)
+|从左到右
+|===
+
+NOTE: 界面翻译为机器生成。如发现翻译不准确，特别是 WMO/气象术语，请通过项目问题跟踪器报告。
+
+=== 导航
+
+左侧（阿拉伯语 RTL 模式下为右侧）的导航抽屉提供对六个视图的访问。每个视图也可通过键盘快捷键访问：
+
+[cols="1,1,3"]
+|===
+|快捷键 |视图 |说明
+
+|kbd:[Alt+1]
+|*仪表板*
+|嵌入式 Grafana 面板，实时显示下载速率、队列深度和字节总量
+
+|kbd:[Alt+2]
+|*目录视图*
+|在所有三个全球发现目录（GDC）中进行全文搜索，支持按数据政策、关键词和边界框过滤
+
+|kbd:[Alt+3]
+|*树形视图*
+|将完整的 WIS2 主题层次结构呈现为可导航树，点击主题即可打开订阅侧边栏
+
+|kbd:[Alt+4]
+|*手动订阅*
+|无需浏览目录，直接输入主题、保存目录和过滤器
+
+|kbd:[Alt+5]
+|*管理订阅*
+|列出所有活跃订阅并取消订阅主题
+
+|kbd:[Alt+6]
+|*设置*
+|查看每个目录的 GDC 记录数量并触发手动数据刷新
+|===
+
+=== 目录视图
+
+目录视图查询从三个 WIS2 全球发现目录（CMA、DWD、ECCC）获取的记录，合并为单个去重列表。
+
+==== 搜索过滤器
+
+[cols="1,3"]
+|===
+|过滤器 |说明
+
+|搜索文本
+|匹配数据集 ID、标题、描述、版本、关键词和主题概念
+
+|数据政策
+|`all`（默认）、`core` 或 `recommended` — 基于 WMO 统一数据政策
+
+|关键词
+|逗号分隔列表；所有关键词必须出现在记录中
+
+|边界框
+|北/西/东/南十进制度；返回几何形状与边界框相交的记录
+|===
+
+点击 *筛选* 运行搜索。结果每页分页显示十条。
+
+==== 结果卡片
+
+每张结果卡片显示：
+
+* 数据集标题和记录 ID
+* 数据政策徽章（`core` = 绿色，`recommended` = 红色）
+* 来源目录芯片（CMA = 蓝色，DWD = 青色，ECCC = 橙色）
+* 如果记录内容在各目录之间不同，显示警告图标
+* *显示元数据* — 打开包含完整记录详情和数据集地理范围交互地图的对话框
+* *选择* / *取消选择* — 将数据集的 MQTT 主题添加或删除到订阅侧边栏
+
+=== 树形视图
+
+树形视图根据所有已加载的 GDC 记录呈现完整的 WIS2 主题层次结构。展开节点可向下导航到各个主题。在顶部的过滤框中输入内容可搜索所有节点标签。点击叶节点可打开订阅侧边栏。
+
+NOTE: 树形视图中一次只能激活一个主题。
+
+=== 从界面创建订阅
+
+当选择了一个主题（从目录搜索或树形视图）后，订阅侧边栏在右侧打开。
+
+[cols="1,3"]
+|===
+|字段 |说明
+
+|已选主题
+|活跃的 MQTT 主题
+
+|保存目录
+|`/data` 下保存文件的路径（默认 `./`）
+
+|数据集
+|将下载过滤到特定数据集；在目录视图中锁定为已选记录
+
+|媒体类型
+|按 MIME 类型限制下载
+
+|边界框
+|下载时应用的空间过滤器
+
+|日期和时间范围
+|下载时应用的时间过滤器
+
+|自定义过滤器
+|来自 GDC 记录链接元数据的特定数据集过滤字段（仅目录视图）
+|===
+
+点击 *订阅* 打开显示完整 JSON 载荷的确认对话框。审查后，点击 *确认* 创建订阅，或点击 *取消* 返回。
+
+=== 管理订阅
+
+订阅视图列出所有活跃订阅及其保存路径。点击任意条目上的 *取消订阅* 将其删除。使用 *重新加载订阅* 在通过 API 进行任何更改后刷新列表。
+
+=== 设置
+
+设置视图显示从每个 GDC 加载的记录数量。点击 *刷新 GDC 数据* 强制从所有三个目录进行新鲜抓取，绕过 Redis 缓存。
+
+== 理解 WIS2 主题
+
+WIS2 使用 MQTT 主题层次结构来组织数据。主题遵循以下模式：
+
+[source]
+----
+origin/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+cache/a/wis2/{centre-id}/data/{data-policy}/{earth-system-domain}/{category}/...
+----
+
+* `origin` - 来自数据提供者的原始数据
+* `cache` - 来自全球缓存的缓存副本（推荐用于可靠性）
+* `{centre-id}` - 国家/组织代码，前缀为 ISO2C 国家代码
+* `{data-policy}` - 适用于数据的 WMO 统一数据政策（core 或 recommended）
+* `{earth-system-domain}` - WMO 统一数据政策中的地球系统领域或学科
+
+=== 主题示例
+
+[cols="1,2"]
+|===
+|主题 |说明
+
+|`cache/a/wis2/de-dwd/data/#`
+|来自 Deutscher Wetterdienst 的所有数据
+
+|`cache/a/wis2/+/data/core/weather/surface-based-observations/#`
+|来自所有 WIS2 节点的核心地面观测数据
+
+|===
+
+=== 通配符
+
+[cols="1,3"]
+|===
+|通配符 |含义
+
+|`+`
+|精确匹配一个级别（例如任意国家代码）
+
+|`#`
+|匹配零个或多个级别（必须在主题末尾）
+|===
+
+== 通过 REST API 管理订阅
+
+订阅也可以使用 REST API 通过编程方式管理。默认地址为 `http://localhost:5002`，但实际的主机名和端口可能因部署方式而有所不同。
+
+TIP: 使用 `http://<host>:5002/swagger` 的 Swagger UI 进行交互式 API 探索。
+
+=== 创建订阅
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "surface-obs"
+  }'
+----
+
+响应：
+[source,json]
+----
+{
+  "status": "accepted",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "target": "surface-obs"
+}
+----
+
+=== 订阅参数
+
+[cols="1,1,3"]
+|===
+|参数 |必填 |说明
+
+|`topic`
+|是
+|带通配符的 WIS2 MQTT 主题模式
+
+|`target`
+|否
+|下载文件的子目录（`/data` 下）
+
+|`filter`
+|否
+|过滤器配置（见 <<过滤>>）
+|===
+
+=== 列出订阅
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+响应：
+[source,json]
+----
+{
+  "cache/a/wis2/+/data/core/weather/surface-based-observations/#": {
+    "a1b2c3d4-...": {
+      "save_path": "surface-obs",
+      "filter": {}
+    }
+  }
+}
+----
+
+=== 获取订阅详情
+
+首先列出订阅以找到订阅 ID（`a1b2c3d4-...`），然后按 ID 获取：
+
+[source,bash]
+----
+curl http://localhost:5002/subscriptions/<id>
+----
+
+响应：
+[source,json]
+----
+{
+  "id": "a1b2c3d4-...",
+  "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+  "save_path": "surface-obs",
+  "filter": {}
+}
+----
+
+=== 删除订阅
+
+[source,bash]
+----
+curl -X DELETE http://localhost:5002/subscriptions/<id>
+----
+
+NOTE: 其中 `<id>` 是 `GET /subscriptions` 返回的订阅 UUID。如果这是该主题的最后一个订阅，MQTT 连接也会随之关闭。
+
+[[过滤]]
+== 过滤
+
+订阅接受一个可选的 `filter` 对象，用于控制哪些通知会被下载。
+过滤器使用有序规则 — 第一个匹配的规则决定结果。
+
+=== 过滤器结构
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "my-filter",
+    "rules": [
+      {
+        "id": "rule-1",
+        "order": 1,
+        "match": { ... },
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": { "always": true },
+        "action": "reject"
+      }
+    ]
+  }
+}
+----
+
+每条规则需要：
+
+[cols="1,1,3"]
+|===
+|字段 |必填 |说明
+
+|`id`
+|是
+|规则触发时显示在日志中的简短标签
+
+|`order`
+|是
+|规则按升序评估 — 数字越小越先评估
+
+|`match`
+|是
+|规则适用的条件（见 <<匹配条件>>）
+
+|`action`
+|是
+|`accept`、`reject` 或 `continue`（继续到下一条规则）
+
+|`reason`
+|否
+|显示在日志和指标中的可读说明
+|===
+
+如果没有规则匹配，默认结果为 **accept**。
+
+=== 默认行为（无过滤器）
+
+当未提供 `filter` 时，将运行内置默认过滤器，拒绝不在标准允许列表（BUFR、GRIB、NetCDF、HDF5、常见图像和文本格式）中的任何媒体类型。要接受所有内容，请使用明确的全接受过滤器：
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "accept-all",
+    "rules": [
+      {"id": "accept-all", "order": 1, "match": {"always": true}, "action": "accept"}
+    ]
+  }
+}
+----
+
+[[匹配条件]]
+=== 匹配条件
+
+==== 始终 / 从不
+
+[source,json]
+----
+{"always": true}   <1>
+{"always": false}  <2>
+----
+<1> 无条件匹配 — 可用作列表末尾的默认规则
+<2> 从不匹配
+
+==== 简单字段
+
+匹配 WIS2 通知中可用的元数据：
+
+[source,json]
+----
+{"centre_id":   {"equals": "de-dwd"}}
+{"topic":       {"pattern": "cache/a/wis2/+/data/core/weather/#"}}
+{"href":        {"regex": "\\.bufr4?$"}}
+{"data_id":     {"not_equals": "some-id"}}
+----
+
+可用字段：
+
+[cols="1,3"]
+|===
+|字段 |说明
+
+|`centre_id`
+|主题第 3 位的中心标识符（例如 `de-dwd`、`ca-eccc-msc`）
+
+|`topic`
+|完整的 MQTT 主题字符串
+
+|`href`
+|通知中的下载 URL
+
+|`data_id`
+|WIS2 通知中的 `properties.data_id`
+
+|`metadata_id`
+|WIS2 通知中的 `properties.metadata_id`
+
+|`media_type`
+|下载文件检测到的 MIME 类型 — **仅下载后可用**（见 <<两阶段>>）
+|===
+
+可用运算符：`equals`、`not_equals`、`in`、`not_in`、`pattern`（glob）、`regex`、`exists`
+
+==== 大小
+
+匹配文件大小（字节）。`size` 字段使用其自己的字节单位运算符：
+
+[source,json]
+----
+{"size": {"gt_bytes":  104857600}}             <1>
+{"size": {"lte_bytes": 1048576}}               <2>
+{"size": {"between_bytes": [1024, 5242880]}}   <3>
+----
+<1> 大于 100 MB
+<2> 不超过 1 MB
+<3> 1 KB 到 5 MB 之间
+
+运算符：`gt_bytes`、`gte_bytes`、`lt_bytes`、`lte_bytes`、`between_bytes`、`exists`
+
+NOTE: `size` 是实际下载的字节数，只有**在**文件获取**之后**才知道 — 见 <<两阶段>>。
+
+==== 地理边界框
+
+如果通知的几何形状落在边界框内则匹配。没有几何形状的通知会直接通过。
+
+[source,json]
+----
+{"bbox": {"north": 55.0, "south": 47.0, "east": 15.0, "west": 6.0}}
+----
+
+四个坐标都是必填的，以十进制度表示。
+
+==== 动态通知属性
+
+使用 `property` 键匹配 WIS2 通知 `properties` 对象内的任意字段：
+
+[source,json]
+----
+{"property": "model_run",     "type": "string",   "equals": "00"}
+{"property": "forecast_hour", "type": "integer",  "lte": 48}
+{"property": "datetime",      "type": "datetime", "gte": "2024-01-01T00:00:00Z"}
+----
+
+支持的类型：`string`、`integer`、`number`、`boolean`、`datetime`
+
+=== 组合器
+
+条件可以使用逻辑组合器嵌套：
+
+[source,json]
+----
+{"all": [condition1, condition2]}   <1>
+{"any": [condition1, condition2]}   <2>
+{"not": condition}                  <3>
+----
+<1> AND — 所有子条件必须匹配
+<2> OR — 任意子条件匹配即可
+<3> NOT — 子条件不得匹配
+
+示例 — 仅接受来自特定中心的 00Z 和 12Z 短期预报：
+
+[source,json]
+----
+{
+  "all": [
+    {"centre_id": {"equals": "ca-eccc-msc"}},
+    {"any": [
+      {"property": "model_run", "type": "string", "equals": "00"},
+      {"property": "model_run", "type": "string", "equals": "12"}
+    ]},
+    {"property": "forecast_hour", "type": "integer", "lte": 48}
+  ]
+}
+----
+
+[[两阶段]]
+=== 下载前和下载后评估
+
+WARNING: `media_type` 和 `size` 只有在文件下载*后*才知道。过滤器会评估*两次*：下载前一次（预下载）和下载后一次（后下载）。依赖 `media_type` 或 `size` 的规则在预下载阶段会被静默跳过。
+
+这意味着以下过滤器**会拒绝所有内容** — `media_type` 规则在预下载阶段永远不会触发，`reject-all` 规则会触发：
+
+[source,json]
+----
+{
+  "rules": [
+    {"id": "accept-bufr", "order": 1,
+     "match": {"media_type": {"in": ["application/bufr"]}}, "action": "accept"},
+    {"id": "reject-all",  "order": 99,
+     "match": {"always": true}, "action": "reject"}
+  ]
+}
+----
+
+正确的模式是用 `media_type.exists` 来保护拒绝规则，使其只在类型已知的下载后阶段触发：
+
+[source,json]
+----
+{
+  "rules": [
+    {"id": "accept-bufr", "order": 1,
+     "match": {"media_type": {"in": ["application/bufr", "application/octet-stream"]}},
+     "action": "accept"},
+    {"id": "reject-wrong-type", "order": 2,
+     "match": {"media_type": {"exists": true}},
+     "action": "reject", "reason": "Media type not allowed"}
+  ]
+}
+----
+
+预下载：两条规则都不触发（都需要已知的 `media_type`）→ 下载继续。+
+后下载：规则 1 接受 BUFR/octet-stream；规则 2 拒绝其他所有内容。
+
+=== 支持的媒体类型
+
+未指定过滤器时默认接受的类型：
+
+[cols="1,2"]
+|===
+|类别 |类型
+
+|WMO 格式
+|`application/bufr`、`application/grib`
+
+|科学
+|`application/x-hdf`、`application/x-hdf5`、`application/x-netcdf`、`application/x-netcdf4`
+
+|图像
+|`image/gif`、`image/jpeg`、`image/png`、`image/tiff`
+
+|文档
+|`application/pdf`、`application/postscript`
+
+|文本
+|`text/plain`、`text/html`、`text/xml`、`text/csv`、`text/tab-separated-values`
+
+|二进制
+|`application/octet-stream`
+|===
+
+=== 过滤器示例
+
+==== 仅接受 BUFR 和 GRIB
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "wmo-formats-only",
+    "rules": [
+      {
+        "id": "accept-wmo",
+        "order": 1,
+        "match": {"media_type": {"in": ["application/bufr", "application/grib"]}},
+        "action": "accept"
+      },
+      {
+        "id": "reject-other",
+        "order": 2,
+        "match": {"media_type": {"exists": true}},
+        "action": "reject",
+        "reason": "Not a WMO format"
+      }
+    ]
+  }
+}
+----
+
+==== 拒绝超过 100 MB 的文件
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "size-limit",
+    "rules": [
+      {
+        "id": "reject-large",
+        "order": 1,
+        "match": {"size": {"gt_bytes": 104857600}},
+        "action": "reject",
+        "reason": "Exceeds 100 MB"
+      }
+    ]
+  }
+}
+----
+
+==== 特定中心的数据，仅短期预报
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "eccc-short-range",
+    "rules": [
+      {
+        "id": "reject-large",
+        "order": 1,
+        "match": {"size": {"gt_bytes": 104857600}},
+        "action": "reject",
+        "reason": "Exceeds 100 MB"
+      },
+      {
+        "id": "accept-short-range",
+        "order": 2,
+        "match": {
+          "all": [
+            {"property": "model_run",     "type": "string",  "in": ["00", "12"]},
+            {"property": "forecast_hour", "type": "integer", "lte": 48}
+          ]
+        },
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": {"always": true},
+        "action": "reject"
+      }
+    ]
+  }
+}
+----
+
+==== 地理区域过滤器
+
+[source,json]
+----
+{
+  "filter": {
+    "name": "europe-only",
+    "rules": [
+      {
+        "id": "accept-europe",
+        "order": 1,
+        "match": {"bbox": {"north": 71.0, "south": 34.0, "east": 40.0, "west": -25.0}},
+        "action": "accept"
+      },
+      {
+        "id": "default",
+        "order": 999,
+        "match": {"always": true},
+        "action": "reject",
+        "reason": "Outside European bounding box"
+      }
+    ]
+  }
+}
+----
+
+== 已下载的文件
+
+=== 文件组织
+
+文件按下载日期组织在目标目录下的 `YYYY/MM/DD` 子目录中（基于文件*下载*的日期，而非观测时间或数据有效时间）：
+
+[source]
+----
+/data/
+└── surface-obs/           # Your target directory
+    └── 2026/
+        └── 03/
+            └── 05/        # Date downloaded (UTC)
+                ├── SYNOP_20260305T120000.bufr
+                ├── SYNOP_20260305T121500.bufr
+                └── ...
+----
+
+NOTE: 目录日期反映文件到达的时间，而非数据生产或有效的时间。较早观测期的数据若延迟到达，将出现在其下载日期对应的目录中。
+
+=== 文件命名
+
+文件保留下载 URL 中的原始名称。如果同名文件已存在且不是更新，则跳过下载。
+
+=== 查看下载
+
+[source,bash]
+----
+# 列出最近的下载
+ls -la downloads/surface-obs/$(date +%Y/%m/%d)/
+
+# 按类型统计文件数量
+find downloads/ -name "*.bufr" | wc -l
+
+# 总大小
+du -sh downloads/
+----
+
+NOTE: `du` 报告的磁盘使用量基于文件系统块分配，而非原始字节数。许多小文件（例如 BUFR 电报）无论实际大小如何都会占用完整的一个块，因此 `du` 的结果通常会大于 `ls -la` 报告的各文件大小之和。
+
+== 监控
+
+=== 健康检查
+
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+响应：
+[source,json]
+----
+{"status": "healthy"}
+----
+
+=== 指标
+
+查看下载统计：
+
+[source,bash]
+----
+# 总下载量
+curl -s http://localhost:5002/metrics | grep wis2downloader_downloads_total
+
+# 失败的下载
+curl -s http://localhost:5002/metrics | grep wis2downloader_failed_total
+
+# 队列深度
+curl -s http://localhost:5002/metrics | grep wis2downloader_celery_queue_length
+----
+
+=== 仪表板视图
+
+集成仪表板（kbd:[Alt+1]）实时显示下载速率、队列深度、磁盘使用情况和字节总量。无需单独登录。
+
+TIP: 仪表板直接嵌入 Web 界面——无需单独打开 Grafana。
+
+== 常见使用场景
+
+=== 订阅所有地面观测
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#",
+    "target": "synop"
+  }'
+----
+
+=== 订阅特定国家
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/de-dwd/data/#",
+    "target": "dwd"
+  }'
+----
+
+=== 仅下载 BUFR 和 GRIB 文件
+
+[source,bash]
+----
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "cache/a/wis2/+/data/#",
+    "target": "wmo-formats",
+    "filter": {
+      "name": "wmo-formats-only",
+      "rules": [
+        {
+          "id": "accept-wmo",
+          "order": 1,
+          "match": {"media_type": {"in": ["application/bufr", "application/grib"]}},
+          "action": "accept"
+        },
+        {
+          "id": "reject-other",
+          "order": 2,
+          "match": {"media_type": {"exists": true}},
+          "action": "reject",
+          "reason": "Not a WMO format"
+        }
+      ]
+    }
+  }'
+----
+
+=== 多个订阅
+
+为不同数据类型创建单独的订阅：
+
+[source,bash]
+----
+# 地面观测
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/surface-based-observations/#", "target": "surface"}'
+
+# 高空观测
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/upper-air-observations/#", "target": "upper-air"}'
+
+# 预报
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "cache/a/wis2/+/data/core/weather/prediction/#", "target": "forecasts"}'
+----
+
+== 故障排除
+
+=== 没有下载文件
+
+1. 检查订阅是否存在：
++
+[source,bash]
+----
+curl http://localhost:5002/subscriptions
+----
+
+2. 检查系统健康状况：
++
+[source,bash]
+----
+curl http://localhost:5002/health
+----
+
+3. 检查跳过的下载（指标）：
++
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep skipped
+----
+
+=== 文件被跳过
+
+在指标中检查跳过原因：
+
+[source,bash]
+----
+curl -s http://localhost:5002/metrics | grep wis2downloader_skipped_total
+----
+
+常见原因：
+
+* `PreviouslyProcessed` - 文件已下载（去重）
+* `FilterRejected` - 被过滤器规则拒绝
+* `GlobalCacheBlacklisted` - 缓存通过 `GC_EXCLUDE` 被排除
+
+=== 下载了错误的文件类型
+
+删除现有订阅并使用 `media_type` 过滤器重新创建。使用 `media_type.exists` 作为拒绝保护 — 而非 `always: true` — 这样拒绝规则只在文件类型已知后才触发（见 <<两阶段>>）：
+
+[source,bash]
+----
+# 列出订阅以找到 UUID
+curl http://localhost:5002/subscriptions
+
+# 按 UUID 删除旧订阅
+curl -X DELETE http://localhost:5002/subscriptions/<id>
+
+# 创建带过滤器的新订阅
+curl -X POST http://localhost:5002/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "your-topic",
+    "target": "your-target",
+    "filter": {
+      "name": "bufr-only",
+      "rules": [
+        {
+          "id": "accept-bufr",
+          "order": 1,
+          "match": {"media_type": {"in": ["application/bufr", "application/octet-stream"]}},
+          "action": "accept"
+        },
+        {
+          "id": "reject-other",
+          "order": 2,
+          "match": {"media_type": {"exists": true}},
+          "action": "reject",
+          "reason": "Media type not allowed"
+        }
+      ]
+    }
+  }'
+----
+
+=== 所有内容都被过滤器拒绝
+
+如果所有通知都以 `FilterRejected` 原因被拒绝，最常见的原因是 `always: true` 拒绝规则在预下载阶段触发，此时 `media_type` 尚不知道。
+
+检查您的过滤器：如果有一条 `media_type` 接受规则后跟一条 `always: true` 拒绝规则，接受规则在预下载阶段永远不会触发，因为 `media_type` 只在下载后才知道。将 `always: true` 拒绝替换为 `media_type.exists: true` — 见 <<两阶段>>。
